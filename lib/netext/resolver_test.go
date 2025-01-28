@@ -9,7 +9,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"go.k6.io/k6/lib/testutils/mockresolver"
+	"go.k6.io/k6/internal/lib/testutils/mockresolver"
 	"go.k6.io/k6/lib/types"
 )
 
@@ -26,7 +26,7 @@ func TestResolver(t *testing.T) {
 			net.ParseIP("2001:db8::11"),
 			net.ParseIP("2001:db8::12"),
 		},
-	}, nil)
+	})
 
 	t.Run("LookupIP", func(t *testing.T) {
 		t.Parallel()
@@ -73,7 +73,8 @@ func TestResolver(t *testing.T) {
 
 				if tc.ttl > 0 {
 					require.IsType(t, &cacheResolver{}, r)
-					cr := r.(*cacheResolver)
+					cr, ok := r.(*cacheResolver)
+					assert.True(t, ok)
 					assert.Len(t, cr.cache, 1)
 					assert.Equal(t, tc.ttl, cr.ttl)
 					firstLookup := cr.cache[host].lastLookup

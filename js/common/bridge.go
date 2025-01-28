@@ -17,7 +17,7 @@ var fieldNameExceptions = map[string]string{
 
 // FieldName Returns the JS name for an exported struct field. The name is snake_cased, with respect for
 // certain common initialisms (URL, ID, HTTP, etc).
-func FieldName(t reflect.Type, f reflect.StructField) string {
+func FieldName(_ reflect.Type, f reflect.StructField) string {
 	// PkgPath is non-empty for unexported fields.
 	if f.PkgPath != "" {
 		return ""
@@ -53,7 +53,7 @@ var methodNameExceptions = map[string]string{
 
 // MethodName Returns the JS name for an exported method. The first letter of the method's name is
 // lowercased, otherwise it is unaltered.
-func MethodName(t reflect.Type, m reflect.Method) string {
+func MethodName(_ reflect.Type, m reflect.Method) string {
 	// A field with a name beginning with an X is a constructor, and just gets the prefix stripped.
 	// Note: They also get some special treatment from Bridge(), see further down.
 	if m.Name[0] == 'X' {
@@ -67,15 +67,15 @@ func MethodName(t reflect.Type, m reflect.Method) string {
 	return strings.ToLower(m.Name[0:1]) + m.Name[1:]
 }
 
-// FieldNameMapper for goja.Runtime.SetFieldNameMapper()
+// FieldNameMapper for sobek.Runtime.SetFieldNameMapper()
 type FieldNameMapper struct{}
 
-// FieldName is part of the goja.FieldNameMapper interface
-// https://godoc.org/github.com/dop251/goja#FieldNameMapper
+// FieldName is part of the sobek.FieldNameMapper interface
+// https://godoc.org/github.com/grafana/sobek#FieldNameMapper
 func (FieldNameMapper) FieldName(t reflect.Type, f reflect.StructField) string {
 	return FieldName(t, f)
 }
 
-// MethodName is part of the goja.FieldNameMapper interface
-// https://godoc.org/github.com/dop251/goja#FieldNameMapper
+// MethodName is part of the sobek.FieldNameMapper interface
+// https://godoc.org/github.com/grafana/sobek#FieldNameMapper
 func (FieldNameMapper) MethodName(t reflect.Type, m reflect.Method) string { return MethodName(t, m) }

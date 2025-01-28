@@ -13,8 +13,8 @@ import (
 	"go.k6.io/k6/metrics"
 	"go.k6.io/k6/output"
 
+	prompb "buf.build/gen/go/prometheus/prometheus/protocolbuffers/go"
 	"github.com/sirupsen/logrus"
-	prompb "go.buf.build/grpc/go/prometheus/prometheus"
 )
 
 var _ output.Output = new(Output)
@@ -170,7 +170,7 @@ func (o *Output) setTrendStatsResolver(trendStats []string) error {
 	// it adds it specifically
 	if hasSum {
 		resolvers["sum"] = func(t *metrics.TrendSink) float64 {
-			return t.Sum
+			return t.Total()
 		}
 	}
 	o.trendStatsResolver = make(TrendStatsResolver, len(resolvers))

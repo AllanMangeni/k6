@@ -4,12 +4,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io/ioutil"
+	"io"
 	"net/http"
 
 	"go.k6.io/k6/errext"
 	"go.k6.io/k6/errext/exitcodes"
-	"go.k6.io/k6/execution"
+	"go.k6.io/k6/internal/execution"
 	"go.k6.io/k6/lib/executor"
 )
 
@@ -37,7 +37,7 @@ func getFirstExternallyControlledExecutor(execScheduler *execution.Scheduler) (*
 func handlePatchStatus(cs *ControlSurface, rw http.ResponseWriter, r *http.Request) {
 	rw.Header().Set("Content-Type", "application/json; charset=utf-8")
 
-	body, err := ioutil.ReadAll(r.Body)
+	body, err := io.ReadAll(r.Body)
 	if err != nil {
 		apiError(rw, "Couldn't read request", err.Error(), http.StatusBadRequest)
 		return
@@ -52,10 +52,13 @@ func handlePatchStatus(cs *ControlSurface, rw http.ResponseWriter, r *http.Reque
 	status := statusEnvelop.Status()
 
 	if status.Stopped { //nolint:nestif
-		execution.AbortTestRun(cs.RunCtx, errext.WithAbortReasonIfNone(
-			errext.WithExitCodeIfNone(fmt.Errorf("test run stopped from REST API"), exitcodes.ScriptStoppedFromRESTAPI),
-			errext.AbortedByUser,
-		))
+		execution.AbortTestRun( //nolint:contextcheck // false-positive cs.RunCtx a right way of passing context there
+			cs.RunCtx,
+			errext.WithAbortReasonIfNone(
+				errext.WithExitCodeIfNone(fmt.Errorf("test run stopped from REST API"), exitcodes.ScriptStoppedFromRESTAPI),
+				errext.AbortedByUser,
+			),
+		)
 	} else {
 		if status.Paused.Valid {
 			if err = cs.Scheduler.SetPaused(status.Paused.Bool); err != nil {

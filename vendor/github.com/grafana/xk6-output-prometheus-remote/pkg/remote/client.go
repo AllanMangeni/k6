@@ -7,12 +7,15 @@ import (
 	"crypto/tls"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"net/url"
 	"time"
 
-	"github.com/golang/snappy"
-	prompb "go.buf.build/grpc/go/prometheus/prometheus"
+	"github.com/grafana/xk6-output-prometheus-remote/pkg/sigv4"
+
+	prompb "buf.build/gen/go/prometheus/prometheus/protocolbuffers/go"
+	"github.com/klauspost/compress/snappy"
 	"google.golang.org/protobuf/proto"
 )
 
@@ -21,6 +24,7 @@ type HTTPConfig struct {
 	Timeout   time.Duration
 	TLSConfig *tls.Config
 	BasicAuth *BasicAuth
+	SigV4     *sigv4.Config
 	Headers   http.Header
 }
 
@@ -58,6 +62,13 @@ func NewWriteClient(endpoint string, cfg *HTTPConfig) (*WriteClient, error) {
 		wc.hc.Transport = &http.Transport{
 			TLSClientConfig: cfg.TLSConfig,
 		}
+	}
+	if cfg.SigV4 != nil {
+		tripper, err := sigv4.NewRoundTripper(cfg.SigV4, wc.hc.Transport)
+		if err != nil {
+			return nil, err
+		}
+		wc.hc.Transport = tripper
 	}
 	return wc, nil
 }
@@ -117,7 +128,7 @@ func newWriteRequestBody(series []*prompb.TimeSeries) ([]byte, error) {
 	}
 	if snappy.MaxEncodedLen(len(b)) < 0 {
 		return nil, fmt.Errorf("the protobuf message is too large to be handled by Snappy encoder; "+
-			"size: %d, limit: %d", len(b), 0xffffffff)
+			"size: %d, limit: %d", len(b), math.MaxUint32)
 	}
 	return snappy.Encode(nil, b), nil
 }
