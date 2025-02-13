@@ -5,7 +5,7 @@ import (
 	"crypto/tls"
 	"errors"
 	"fmt"
-	"io/ioutil"
+	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -21,8 +21,8 @@ import (
 	"github.com/stretchr/testify/require"
 	"golang.org/x/net/http2"
 
+	"go.k6.io/k6/internal/lib/testutils/httpmultibin"
 	"go.k6.io/k6/lib/netext"
-	"go.k6.io/k6/lib/testutils/httpmultibin"
 	"go.k6.io/k6/lib/types"
 )
 
@@ -180,11 +180,15 @@ func TestHTTP2StreamError(t *testing.T) {
 	t.Parallel()
 	tb := httpmultibin.NewHTTPMultiBin(t)
 
-	tb.Mux.HandleFunc("/tsr", func(rw http.ResponseWriter, req *http.Request) {
+	tb.Mux.HandleFunc("/tsr", func(rw http.ResponseWriter, _ *http.Request) {
 		rw.Header().Set("Content-Length", "100000")
 		rw.WriteHeader(http.StatusOK)
 
-		rw.(http.Flusher).Flush()
+		f, ok := rw.(http.Flusher)
+		if !ok {
+			panic("expected http.ResponseWriter to be http.Flusher")
+		}
+		f.Flush()
 		time.Sleep(time.Millisecond * 2)
 		panic("expected internal error")
 	})
@@ -196,7 +200,7 @@ func TestHTTP2StreamError(t *testing.T) {
 	res, err := client.Get(tb.Replacer.Replace("HTTP2BIN_URL/tsr")) //nolint:noctx
 	require.NotNil(t, res)
 	require.NoError(t, err)
-	_, err = ioutil.ReadAll(res.Body)
+	_, err = io.ReadAll(res.Body)
 	_ = res.Body.Close()
 	require.Error(t, err)
 
@@ -260,7 +264,7 @@ func TestDefaultTLSError(t *testing.T) {
 	l, err := net.Listen("tcp", "127.0.0.1:0")
 	require.NoError(t, err)
 	go func() {
-		conn, err := l.Accept() //nolint:govet // the shadowing is intentional
+		conn, err := l.Accept()
 		require.NoError(t, err)
 		_, err = conn.Write([]byte("not tls header")) // we just want to get an error
 		require.NoError(t, err)
@@ -292,8 +296,8 @@ func TestHTTP2ConnectionError(t *testing.T) {
 	tb := getHTTP2ServerWithCustomConnContext(t)
 
 	// Pre-configure the HTTP client transport with the dialer and TLS config (incl. HTTP2 support)
-	tb.Mux.HandleFunc("/tsr", func(rw http.ResponseWriter, req *http.Request) {
-		conn := req.Context().Value(connKey).(*tls.Conn) //nolint:forcetypeassert
+	tb.Mux.HandleFunc("/tsr", func(_ http.ResponseWriter, req *http.Request) {
+		conn := req.Context().Value(connKey).(*tls.Conn)
 		f := http2.NewFramer(conn, conn)
 		require.NoError(t, f.WriteData(3213, false, []byte("something")))
 	})
@@ -311,9 +315,12 @@ func TestHTTP2ConnectionError(t *testing.T) {
 func TestHTTP2GoAwayError(t *testing.T) {
 	t.Parallel()
 
+	if runtime.GOOS == "windows" {
+		t.Skip("Skipped due to https://github.com/grafana/k6/issues/4098")
+	}
 	tb := getHTTP2ServerWithCustomConnContext(t)
-	tb.Mux.HandleFunc("/tsr", func(rw http.ResponseWriter, req *http.Request) {
-		conn := req.Context().Value(connKey).(*tls.Conn) //nolint:forcetypeassert
+	tb.Mux.HandleFunc("/tsr", func(_ http.ResponseWriter, req *http.Request) {
+		conn := req.Context().Value(connKey).(*tls.Conn)
 		f := http2.NewFramer(conn, conn)
 		require.NoError(t, f.WriteGoAway(4, http2.ErrCodeInadequateSecurity, []byte("whatever")))
 		require.NoError(t, conn.CloseWrite())
@@ -358,7 +365,6 @@ func getHTTP2ServerWithCustomConnContext(t *testing.T) *httpmultibin.HTTPMultiBi
 	dialer := netext.NewDialer(net.Dialer{
 		Timeout:   2 * time.Second,
 		KeepAlive: 10 * time.Second,
-		DualStack: true,
 	}, netext.NewResolver(net.LookupIP, 0, types.DNSfirst, types.DNSpreferIPv4))
 	dialer.Hosts, err = types.NewHosts(map[string]types.Host{
 		http2Domain: *http2DomainValue,
@@ -376,7 +382,7 @@ func getHTTP2ServerWithCustomConnContext(t *testing.T) *httpmultibin.HTTPMultiBi
 		Replacer: strings.NewReplacer(
 			"HTTP2BIN_IP_URL", http2Srv.URL,
 			"HTTP2BIN_DOMAIN", http2Domain,
-			"HTTP2BIN_URL", fmt.Sprintf("https://%s:%s", http2Domain, http2URL.Port()),
+			"HTTP2BIN_URL", fmt.Sprintf("https://%s", net.JoinHostPort(http2Domain, http2URL.Port())),
 			"HTTP2BIN_IP", http2IP.String(),
 			"HTTP2BIN_PORT", http2URL.Port(),
 		),

@@ -3,13 +3,18 @@ package modulestest
 
 import (
 	"context"
+	"net/url"
 	"testing"
 
-	"github.com/dop251/goja"
+	"github.com/grafana/sobek"
+	"go.k6.io/k6/internal/js/compiler"
+	"go.k6.io/k6/internal/js/eventloop"
+	"go.k6.io/k6/internal/js/modules/k6/timers"
+	"go.k6.io/k6/internal/lib/testutils"
+	"go.k6.io/k6/internal/usage"
 	"go.k6.io/k6/js/common"
-	"go.k6.io/k6/js/eventloop"
+	"go.k6.io/k6/js/modules"
 	"go.k6.io/k6/lib"
-	"go.k6.io/k6/lib/testutils"
 	"go.k6.io/k6/metrics"
 )
 
@@ -19,6 +24,8 @@ type Runtime struct {
 	EventLoop      *eventloop.EventLoop
 	CancelContext  func()
 	BuiltinMetrics *metrics.BuiltinMetrics
+
+	mr *modules.ModuleResolver
 }
 
 // NewRuntime will create a new test runtime and will cancel the context on test/benchmark end
@@ -27,12 +34,16 @@ func NewRuntime(t testing.TB) *Runtime {
 	t.Cleanup(cancel)
 	vu := &VU{
 		CtxField:     ctx,
-		RuntimeField: goja.New(),
+		RuntimeField: sobek.New(),
 	}
 	vu.RuntimeField.SetFieldNameMapper(common.FieldNameMapper{})
 	vu.InitEnvField = &common.InitEnvironment{
-		Logger:   testutils.NewLogger(t),
-		Registry: metrics.NewRegistry(),
+		TestPreInitState: &lib.TestPreInitState{
+			Logger:   testutils.NewLogger(t),
+			Registry: metrics.NewRegistry(),
+			Usage:    usage.New(),
+		},
+		CWD: new(url.URL),
 	}
 
 	eventloop := eventloop.New(vu)
@@ -52,4 +63,60 @@ func NewRuntime(t testing.TB) *Runtime {
 func (r *Runtime) MoveToVUContext(state *lib.State) {
 	r.VU.InitEnvField = nil
 	r.VU.StateField = state
+}
+
+// SetupModuleSystem sets up the modules system for the Runtime.
+// See [modules.NewModuleResolver] for the meaning of the parameters.
+func (r *Runtime) SetupModuleSystem(goModules map[string]any, loader modules.FileLoader, c *compiler.Compiler) error {
+	if goModules == nil {
+		goModules = make(map[string]any)
+	}
+
+	if _, ok := goModules["k6/timers"]; !ok {
+		goModules["k6/timers"] = timers.New()
+	}
+
+	r.mr = modules.NewModuleResolver(
+		goModules, loader, c, r.VU.InitEnvField.CWD, r.VU.InitEnvField.Usage, r.VU.InitEnvField.Logger)
+	return r.innerSetupModuleSystem()
+}
+
+// SetupModuleSystemFromAnother sets up the modules system for the Runtime by using the resolver of another runtime.
+func (r *Runtime) SetupModuleSystemFromAnother(another *Runtime) error {
+	r.mr = another.mr
+	return r.innerSetupModuleSystem()
+}
+
+// RunOnEventLoop will run the given code on the event loop.
+//
+// It is meant as a helper to test code that is expected to be run on the event loop, such
+// as code that returns a promise.
+//
+// A typical usage is to facilitate writing tests for asynchrounous code:
+//
+//	func TestSomething(t *testing.T) {
+//	    runtime := modulestest.NewRuntime(t)
+//
+//	    err := runtime.RunOnEventLoop(`
+//	        doSomethingAsync().then(() => {
+//	            // do some assertions
+//	        });
+//	    `)
+//	    require.NoError(t, err)
+//	}
+func (r *Runtime) RunOnEventLoop(code string) (value sobek.Value, err error) {
+	defer r.EventLoop.WaitOnRegistered()
+
+	err = r.EventLoop.Start(func() error {
+		value, err = r.VU.Runtime().RunString(code)
+		return err
+	})
+
+	return value, err
+}
+
+func (r *Runtime) innerSetupModuleSystem() error {
+	ms := modules.NewModuleSystem(r.mr, r.VU)
+	modules.ExportGloballyModule(r.VU.RuntimeField, ms, "k6/timers")
+	return r.VU.RuntimeField.Set("require", ms.Require)
 }

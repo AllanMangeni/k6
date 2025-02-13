@@ -5,23 +5,25 @@ import (
 	"compress/gzip"
 	"encoding/csv"
 	"fmt"
-	"io/ioutil"
+	"io"
 	"sort"
 	"strings"
 	"testing"
 	"time"
 
-	"github.com/spf13/afero"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"go.k6.io/k6/internal/lib/testutils"
 	"go.k6.io/k6/lib"
-	"go.k6.io/k6/lib/testutils"
+	"go.k6.io/k6/lib/fsext"
 	"go.k6.io/k6/metrics"
 	"go.k6.io/k6/output"
 )
 
 func TestMakeHeader(t *testing.T) {
+	t.Parallel()
+
 	testdata := map[string][]string{
 		"One tag": {
 			"tag1",
@@ -33,7 +35,10 @@ func TestMakeHeader(t *testing.T) {
 
 	for testname, tags := range testdata {
 		testname, tags := testname, tags
+
 		t.Run(testname, func(t *testing.T) {
+			t.Parallel()
+
 			header := MakeHeader(tags)
 			assert.Equal(t, len(tags)+5, len(header))
 			assert.Equal(t, "metric_name", header[0])
@@ -46,6 +51,8 @@ func TestMakeHeader(t *testing.T) {
 }
 
 func TestSampleToRow(t *testing.T) {
+	t.Parallel()
+
 	registry := metrics.NewRegistry()
 	testMetric, err := registry.NewMetric("my_metric", metrics.Gauge)
 	require.NoError(t, err)
@@ -306,6 +313,8 @@ func TestSampleToRow(t *testing.T) {
 		expectedRow := expected[i]
 
 		t.Run(testname, func(t *testing.T) {
+			t.Parallel()
+
 			row := SampleToRow(sample, resTags, ignoredTags, make([]string, 3+len(resTags)+2), timeFormat)
 			for ind, cell := range expectedRow.baseRow {
 				assert.Equal(t, cell, row[ind])
@@ -317,16 +326,16 @@ func TestSampleToRow(t *testing.T) {
 	}
 }
 
-func readUnCompressedFile(fileName string, fs afero.Fs) string {
-	csvbytes, err := afero.ReadFile(fs, fileName)
+func readUnCompressedFile(fileName string, fs fsext.Fs) string {
+	csvbytes, err := fsext.ReadFile(fs, fileName)
 	if err != nil {
 		return err.Error()
 	}
 
-	return fmt.Sprintf("%s", csvbytes)
+	return string(csvbytes)
 }
 
-func readCompressedFile(fileName string, fs afero.Fs) string {
+func readCompressedFile(fileName string, fs fsext.Fs) string {
 	file, err := fs.Open(fileName)
 	if err != nil {
 		return err.Error()
@@ -337,12 +346,12 @@ func readCompressedFile(fileName string, fs afero.Fs) string {
 		return err.Error()
 	}
 
-	csvbytes, err := ioutil.ReadAll(gzf)
+	csvbytes, err := io.ReadAll(gzf)
 	if err != nil {
 		return err.Error()
 	}
 
-	return fmt.Sprintf("%s", csvbytes)
+	return string(csvbytes)
 }
 
 func TestRun(t *testing.T) {
@@ -355,7 +364,7 @@ func TestRun(t *testing.T) {
 	testData := []struct {
 		samples        []metrics.SampleContainer
 		fileName       string
-		fileReaderFunc func(fileName string, fs afero.Fs) string
+		fileReaderFunc func(fileName string, fs fsext.Fs) string
 		timeFormat     string
 		outputContent  string
 	}{
@@ -475,7 +484,7 @@ func TestRun(t *testing.T) {
 		data := data
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
-			mem := afero.NewMemMapFs()
+			mem := fsext.NewMemMapFs()
 			env := make(map[string]string)
 			if data.timeFormat != "" {
 				env["K6_CSV_TIME_FORMAT"] = data.timeFormat

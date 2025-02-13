@@ -26,12 +26,16 @@ func NewRegistry() *Registry {
 	}
 }
 
-const nameRegexString = "^[\\p{L}\\p{N}\\._ !\\?/&#\\(\\)<>%-]{1,128}$"
+const (
+	nameRegexString = "^[a-zA-Z_][a-zA-Z0-9_]{1,128}$"
+	badNameWarning  = "Metric names must only include up to 128 ASCII letters, numbers, or underscores " +
+		"and start with a letter or an underscore."
+)
 
 var compileNameRegex = regexp.MustCompile(nameRegexString)
 
 func checkName(name string) bool {
-	return compileNameRegex.Match([]byte(name))
+	return compileNameRegex.MatchString(name)
 }
 
 // NewMetric returns new metric registered to this registry
@@ -41,7 +45,7 @@ func (r *Registry) NewMetric(name string, typ MetricType, t ...ValueType) (*Metr
 	defer r.l.Unlock()
 
 	if !checkName(name) {
-		return nil, fmt.Errorf("Invalid metric name: '%s'", name) //nolint:golint,stylecheck
+		return nil, fmt.Errorf("Invalid metric name: '%s'. %s", name, badNameWarning) //nolint:golint,stylecheck
 	}
 	oldMetric, ok := r.metrics[name]
 
@@ -71,26 +75,28 @@ func (r *Registry) MustNewMetric(name string, typ MetricType, t ...ValueType) *M
 	return m
 }
 
+// All returns all the registered metrics.
+func (r *Registry) All() []*Metric {
+	r.l.RLock()
+	defer r.l.RUnlock()
+
+	if len(r.metrics) < 1 {
+		return nil
+	}
+	s := make([]*Metric, 0, len(r.metrics))
+	for _, m := range r.metrics {
+		s = append(s, m)
+	}
+	return s
+}
+
 func (r *Registry) newMetric(name string, mt MetricType, vt ...ValueType) *Metric {
 	valueType := Default
 	if len(vt) > 0 {
 		valueType = vt[0]
 	}
 
-	var sink Sink
-	switch mt {
-	case Counter:
-		sink = &CounterSink{}
-	case Gauge:
-		sink = &GaugeSink{}
-	case Trend:
-		sink = &TrendSink{}
-	case Rate:
-		sink = &RateSink{}
-	default:
-		return nil
-	}
-
+	sink := NewSink(mt)
 	return &Metric{
 		registry: r,
 		Name:     name,
