@@ -1,7 +1,7 @@
 package lib
 
 import (
-	"crypto/md5"
+	"crypto/md5" //nolint:gosec
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -15,11 +15,17 @@ import (
 	"go.k6.io/k6/lib/types"
 )
 
-// Separator for group IDs.
+// GroupSeparator for group IDs.
 const GroupSeparator = "::"
 
-// Error emitted if you attempt to instantiate a Group or Check that contains the separator.
-var ErrNameContainsGroupSeparator = errors.New("group and check names may not contain '::'")
+// RootGroupPath is the id of the root group
+//
+// Note(@mstoykov): the constant shouldn't be used in all tests in order to not couple the tests too much with it.
+// Changing this will be a breaking change and in this way it will be more obvious.
+const RootGroupPath = ""
+
+// ErrNameContainsGroupSeparator is emitted if you attempt to instantiate a Group or Check that contains the separator.
+var ErrNameContainsGroupSeparator = errors.New("group and check names may not contain '" + GroupSeparator + "'")
 
 // StageFields defines the fields used for a Stage; this is a dumb hack to make the JSON code
 // cleaner. pls fix.
@@ -34,7 +40,8 @@ type StageFields struct {
 // A Stage defines a step in a test's timeline.
 type Stage StageFields
 
-// For some reason, implementing UnmarshalText makes encoding/json treat the type as a string.
+// UnmarshalJSON implements the json.Unmarshaler interface
+// for some reason, implementing UnmarshalText makes encoding/json treat the type as a string.
 func (s *Stage) UnmarshalJSON(b []byte) error {
 	var fields StageFields
 	if err := json.Unmarshal(b, &fields); err != nil {
@@ -44,22 +51,24 @@ func (s *Stage) UnmarshalJSON(b []byte) error {
 	return nil
 }
 
+// MarshalJSON implements the json.Marshaler interface
 func (s Stage) MarshalJSON() ([]byte, error) {
 	return json.Marshal(StageFields(s))
 }
 
+// UnmarshalText implements the encoding.TextUnmarshaler interface
 func (s *Stage) UnmarshalText(b []byte) error {
 	var stage Stage
-	parts := strings.SplitN(string(b), ":", 2)
-	if len(parts) > 0 && parts[0] != "" {
-		d, err := time.ParseDuration(parts[0])
+	durStr, targetStr, _ := strings.Cut(string(b), ":")
+	if durStr != "" {
+		d, err := time.ParseDuration(durStr)
 		if err != nil {
 			return err
 		}
 		stage.Duration = types.NullDurationFrom(d)
 	}
-	if len(parts) > 1 && parts[1] != "" {
-		t, err := strconv.ParseInt(parts[1], 10, 64)
+	if targetStr != "" {
+		t, err := strconv.ParseInt(targetStr, 10, 64)
 		if err != nil {
 			return err
 		}
@@ -99,21 +108,21 @@ type Group struct {
 	checkMutex sync.Mutex
 }
 
-// Creates a new group with the given name and parent group.
+// NewGroup creates a new group with the given name and parent group.
 //
 // The root group must be created with the name "" and parent set to nil; this is the only case
 // where a nil parent or empty name is allowed.
 func NewGroup(name string, parent *Group) (*Group, error) {
-	if strings.Contains(name, GroupSeparator) {
-		return nil, ErrNameContainsGroupSeparator
-	}
-
-	path := name
+	old := RootGroupPath
 	if parent != nil {
-		path = parent.Path + GroupSeparator + path
+		old = parent.Path
+	}
+	path, err := NewGroupPath(old, name)
+	if err != nil {
+		return nil, err
 	}
 
-	hash := md5.Sum([]byte(path))
+	hash := md5.Sum([]byte(path)) //nolint:gosec
 	id := hex.EncodeToString(hash[:])
 
 	return &Group{
@@ -133,15 +142,26 @@ func (g *Group) Group(name string) (*Group, error) {
 	defer g.groupMutex.Unlock()
 	group, ok := g.Groups[name]
 	if !ok {
-		group, err := NewGroup(name, g)
+		var err error
+		group, err = NewGroup(name, g)
 		if err != nil {
 			return nil, err
 		}
 		g.Groups[name] = group
 		g.OrderedGroups = append(g.OrderedGroups, group)
-		return group, nil
 	}
 	return group, nil
+}
+
+// NewGroupPath ...
+func NewGroupPath(old, path string) (string, error) {
+	if strings.Contains(path, GroupSeparator) {
+		return "", ErrNameContainsGroupSeparator
+	}
+	if old == RootGroupPath && path == RootGroupPath {
+		return RootGroupPath, nil
+	}
+	return old + GroupSeparator + path, nil
 }
 
 // Check creates a child check belonging to this group.
@@ -151,13 +171,13 @@ func (g *Group) Check(name string) (*Check, error) {
 	defer g.checkMutex.Unlock()
 	check, ok := g.Checks[name]
 	if !ok {
-		check, err := NewCheck(name, g)
+		var err error
+		check, err = NewCheck(name, g)
 		if err != nil {
 			return nil, err
 		}
 		g.Checks[name] = check
 		g.OrderedChecks = append(g.OrderedChecks, check)
-		return check, nil
 	}
 	return check, nil
 }
@@ -187,14 +207,14 @@ type Check struct {
 	Fails  int64 `json:"fails"`
 }
 
-// Creates a new check with the given name and parent group. The group may not be nil.
+// NewCheck creates a new check with the given name and parent group. The group may not be nil.
 func NewCheck(name string, group *Group) (*Check, error) {
 	if strings.Contains(name, GroupSeparator) {
 		return nil, ErrNameContainsGroupSeparator
 	}
 
 	path := group.Path + GroupSeparator + name
-	hash := md5.Sum([]byte(path))
+	hash := md5.Sum([]byte(path)) //nolint:gosec
 	id := hex.EncodeToString(hash[:])
 
 	return &Check{

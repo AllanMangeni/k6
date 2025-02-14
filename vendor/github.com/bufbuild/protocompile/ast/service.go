@@ -1,4 +1,4 @@
-// Copyright 2020-2022 Buf Technologies, Inc.
+// Copyright 2020-2024 Buf Technologies, Inc.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -76,6 +76,16 @@ func NewServiceNode(keyword *KeywordNode, name *IdentNode, openBrace *RuneNode, 
 	}
 }
 
+func (n *ServiceNode) RangeOptions(fn func(*OptionNode) bool) {
+	for _, decl := range n.Decls {
+		if opt, ok := decl.(*OptionNode); ok {
+			if !fn(opt) {
+				return
+			}
+		}
+	}
+}
+
 // ServiceElement is an interface implemented by all AST nodes that can
 // appear in the body of a service declaration.
 type ServiceElement interface {
@@ -91,14 +101,14 @@ var _ ServiceElement = (*EmptyDeclNode)(nil)
 // declarations. This allows NoSourceNode to be used in place of *RPCNode
 // for some usages.
 type RPCDeclNode interface {
-	Node
+	NodeWithOptions
 	GetName() Node
 	GetInputType() Node
 	GetOutputType() Node
 }
 
 var _ RPCDeclNode = (*RPCNode)(nil)
-var _ RPCDeclNode = NoSourceNode{}
+var _ RPCDeclNode = (*NoSourceNode)(nil)
 
 // RPCNode represents an RPC declaration. Example:
 //
@@ -141,10 +151,12 @@ func NewRPCNode(keyword *KeywordNode, name *IdentNode, input *RPCTypeNode, retur
 	if output == nil {
 		panic("output is nil")
 	}
+	var children []Node
 	if semicolon == nil {
-		panic("semicolon is nil")
+		children = []Node{keyword, name, input, returns, output}
+	} else {
+		children = []Node{keyword, name, input, returns, output, semicolon}
 	}
-	children := []Node{keyword, name, input, returns, output, semicolon}
 	return &RPCNode{
 		compositeNode: compositeNode{
 			children: children,
@@ -227,6 +239,16 @@ func (n *RPCNode) GetInputType() Node {
 
 func (n *RPCNode) GetOutputType() Node {
 	return n.Output.MessageType
+}
+
+func (n *RPCNode) RangeOptions(fn func(*OptionNode) bool) {
+	for _, decl := range n.Decls {
+		if opt, ok := decl.(*OptionNode); ok {
+			if !fn(opt) {
+				return
+			}
+		}
+	}
 }
 
 // RPCElement is an interface implemented by all AST nodes that can
