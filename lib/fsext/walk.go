@@ -1,6 +1,7 @@
 package fsext
 
 import (
+	"errors"
 	"io/fs"
 	"path/filepath"
 	"sort"
@@ -31,7 +32,6 @@ func readDirNames(fs afero.Fs, dirname string) ([]string, error) {
 		return nil, err
 	}
 	err = f.Close()
-
 	if err != nil {
 		return nil, err
 	}
@@ -49,7 +49,7 @@ func readDirNames(fs afero.Fs, dirname string) ([]string, error) {
 func walk(fileSystem afero.Fs, path string, info fs.FileInfo, walkFn filepath.WalkFunc) error {
 	err := walkFn(path, info, nil)
 	if err != nil {
-		if info.IsDir() && err == filepath.SkipDir {
+		if info.IsDir() && errors.Is(err, filepath.SkipDir) {
 			return nil
 		}
 		return err
@@ -68,15 +68,16 @@ func walk(fileSystem afero.Fs, path string, info fs.FileInfo, walkFn filepath.Wa
 		filename := JoinFilePath(path, name)
 		fileInfo, err := fileSystem.Stat(filename)
 		if err != nil {
-			if err = walkFn(filename, fileInfo, err); err != nil && err != filepath.SkipDir {
+			if err = walkFn(filename, fileInfo, err); err != nil && !errors.Is(err, filepath.SkipDir) {
 				return err
 			}
-		} else {
-			err = walk(fileSystem, filename, fileInfo, walkFn)
-			if err != nil {
-				if !fileInfo.IsDir() || err != filepath.SkipDir {
-					return err
-				}
+			return nil
+		}
+
+		err = walk(fileSystem, filename, fileInfo, walkFn)
+		if err != nil {
+			if !fileInfo.IsDir() || !errors.Is(err, filepath.SkipDir) {
+				return err
 			}
 		}
 	}

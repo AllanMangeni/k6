@@ -9,10 +9,10 @@ import (
 	"github.com/sirupsen/logrus"
 	"gopkg.in/guregu/null.v3"
 
+	"go.k6.io/k6/internal/ui/pb"
 	"go.k6.io/k6/lib"
 	"go.k6.io/k6/lib/types"
 	"go.k6.io/k6/metrics"
-	"go.k6.io/k6/ui/pb"
 )
 
 const constantVUsType = "constant-vus"
@@ -88,7 +88,7 @@ func (clvc ConstantVUsConfig) GetExecutionRequirements(et *lib.ExecutionTuple) [
 	return []lib.ExecutionStep{
 		{
 			TimeOffset: 0,
-			PlannedVUs: uint64(clvc.GetVUs(et)),
+			PlannedVUs: uint64(clvc.GetVUs(et)), //nolint:gosec
 		},
 		{
 			TimeOffset: clvc.Duration.TimeDuration() + clvc.GracefulStop.TimeDuration(),
@@ -122,7 +122,7 @@ var _ lib.Executor = &ConstantVUs{}
 
 // Run constantly loops through as many iterations as possible on a fixed number
 // of VUs for the specified duration.
-func (clv ConstantVUs) Run(parentCtx context.Context, out chan<- metrics.SampleContainer) (err error) {
+func (clv ConstantVUs) Run(parentCtx context.Context, _ chan<- metrics.SampleContainer) (err error) {
 	numVUs := clv.config.GetVUs(clv.executionState.ExecutionTuple)
 	duration := clv.config.Duration.TimeDuration()
 	gracefulStop := clv.config.GetGracefulStop()
@@ -180,15 +180,13 @@ func (clv ConstantVUs) Run(parentCtx context.Context, out chan<- metrics.SampleC
 		defer cancel()
 
 		activeVU := initVU.Activate(
-			getVUActivationParams(ctx, clv.config.BaseConfig, returnVU,
-				clv.nextIterationCounters))
+			getVUActivationParams(ctx, clv.config.BaseConfig, returnVU, clv.nextIterationCounters))
 
 		for {
 			select {
 			case <-regDurationDone:
 				return // don't make more iterations
-			default:
-				// continue looping
+			default: // continue looping
 			}
 			runIteration(maxDurationCtx, activeVU)
 		}

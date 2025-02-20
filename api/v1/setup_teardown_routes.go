@@ -2,7 +2,7 @@ package v1
 
 import (
 	"encoding/json"
-	"io/ioutil"
+	"io"
 	"net/http"
 )
 
@@ -42,7 +42,7 @@ func handleGetSetupData(cs *ControlSurface, rw http.ResponseWriter, _ *http.Requ
 
 // handleSetSetupData just parses the JSON request body and sets the result as setup data for the runner
 func handleSetSetupData(cs *ControlSurface, rw http.ResponseWriter, r *http.Request) {
-	body, err := ioutil.ReadAll(r.Body)
+	body, err := io.ReadAll(r.Body)
 	if err != nil {
 		apiError(rw, "Error reading request body", err.Error(), http.StatusBadRequest)
 		return
@@ -71,6 +71,7 @@ func handleRunSetup(cs *ControlSurface, rw http.ResponseWriter, r *http.Request)
 	runner := cs.RunState.Runner
 
 	if err := cs.RunState.Runner.Setup(r.Context(), cs.Samples); err != nil {
+		cs.RunState.Logger.WithError(err).Error("Error executing setup")
 		apiError(rw, "Error executing setup", err.Error(), http.StatusInternalServerError)
 		return
 	}
@@ -81,6 +82,7 @@ func handleRunSetup(cs *ControlSurface, rw http.ResponseWriter, r *http.Request)
 // handleRunTeardown executes the runner's Teardown() method
 func handleRunTeardown(cs *ControlSurface, rw http.ResponseWriter, r *http.Request) {
 	if err := cs.RunState.Runner.Teardown(r.Context(), cs.Samples); err != nil {
+		cs.RunState.Logger.WithError(err).Error("Error executing teardown")
 		apiError(rw, "Error executing teardown", err.Error(), http.StatusInternalServerError)
 	}
 }

@@ -1,3 +1,4 @@
+// Package client provides a simple go-client for the k6's REST API.
 package client
 
 import (
@@ -5,7 +6,6 @@ import (
 	"context"
 	"encoding/json"
 	"io"
-	"io/ioutil"
 	"net/http"
 	"net/url"
 
@@ -84,7 +84,7 @@ func (c *Client) CallAPI(ctx context.Context, method string, rel *url.URL, body,
 				return err
 			}
 		}
-		bodyReader = ioutil.NopCloser(bytes.NewBuffer(bodyData))
+		bodyReader = io.NopCloser(bytes.NewBuffer(bodyData))
 	}
 
 	req := &http.Request{
@@ -100,7 +100,7 @@ func (c *Client) CallAPI(ctx context.Context, method string, rel *url.URL, body,
 	}
 	defer func() { _ = res.Body.Close() }()
 
-	data, err := ioutil.ReadAll(res.Body)
+	data, err := io.ReadAll(res.Body)
 	if err != nil {
 		return err
 	}

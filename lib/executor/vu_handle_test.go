@@ -11,9 +11,9 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"go.k6.io/k6/internal/lib/testutils"
+	"go.k6.io/k6/internal/lib/testutils/minirunner"
 	"go.k6.io/k6/lib"
-	"go.k6.io/k6/lib/testutils"
-	"go.k6.io/k6/lib/testutils/minirunner"
 	"go.k6.io/k6/metrics"
 )
 
@@ -35,18 +35,18 @@ func TestVUHandleRace(t *testing.T) {
 	logEntry := logrus.NewEntry(testLog)
 
 	runner := &minirunner.MiniRunner{}
-	runner.Fn = func(ctx context.Context, _ *lib.State, out chan<- metrics.SampleContainer) error {
+	runner.Fn = func(_ context.Context, _ *lib.State, _ chan<- metrics.SampleContainer) error {
 		return nil
 	}
 
-	var getVUCount int64
-	var returnVUCount int64
+	var getVUCount uint64
+	var returnVUCount uint64
 	getVU := func() (lib.InitializedVU, error) {
-		return runner.NewVU(ctx, uint64(atomic.AddInt64(&getVUCount, 1)), 0, nil)
+		return runner.NewVU(ctx, atomic.AddUint64(&getVUCount, 1), 0, nil)
 	}
 
 	returnVU := func(_ lib.InitializedVU) {
-		atomic.AddInt64(&returnVUCount, 1)
+		atomic.AddUint64(&returnVUCount, 1)
 		// do something
 	}
 	var interruptedIter int64
@@ -107,7 +107,7 @@ func TestVUHandleRace(t *testing.T) {
 		"too big of a difference %d >= %d - 1", interruptedBefore, interruptedAfter)
 	assert.True(t, fullBefore+1 <= fullAfter,
 		"too small of a difference %d + 1 <= %d", fullBefore, fullAfter)
-	require.Equal(t, atomic.LoadInt64(&getVUCount), atomic.LoadInt64(&returnVUCount))
+	require.Equal(t, atomic.LoadUint64(&getVUCount), atomic.LoadUint64(&returnVUCount))
 }
 
 // this test is mostly interesting when -race is enabled
@@ -124,7 +124,7 @@ func TestVUHandleStartStopRace(t *testing.T) {
 	logEntry := logrus.NewEntry(testLog)
 
 	runner := &minirunner.MiniRunner{}
-	runner.Fn = func(ctx context.Context, _ *lib.State, out chan<- metrics.SampleContainer) error {
+	runner.Fn = func(_ context.Context, _ *lib.State, _ chan<- metrics.SampleContainer) error {
 		return nil
 	}
 
@@ -367,7 +367,7 @@ func BenchmarkVUHandleIterations(b *testing.B) {
 	}
 
 	runner := &minirunner.MiniRunner{}
-	runner.Fn = func(ctx context.Context, _ *lib.State, out chan<- metrics.SampleContainer) error {
+	runner.Fn = func(_ context.Context, _ *lib.State, _ chan<- metrics.SampleContainer) error {
 		return nil
 	}
 	getVU := func() (lib.InitializedVU, error) {
