@@ -46,7 +46,7 @@ func getTestRampingArrivalRateConfig() *RampingArrivalRateConfig {
 func TestRampingArrivalRateRunNotEnoughAllocatedVUsWarn(t *testing.T) {
 	t.Parallel()
 
-	runner := simpleRunner(func(ctx context.Context, _ *lib.State) error {
+	runner := simpleRunner(func(_ context.Context, _ *lib.State) error {
 		time.Sleep(time.Second)
 		return nil
 	})
@@ -69,7 +69,7 @@ func TestRampingArrivalRateRunNotEnoughAllocatedVUsWarn(t *testing.T) {
 func TestRampingArrivalRateRunCorrectRate(t *testing.T) {
 	t.Parallel()
 	var count int64
-	runner := simpleRunner(func(ctx context.Context, _ *lib.State) error {
+	runner := simpleRunner(func(_ context.Context, _ *lib.State) error {
 		atomic.AddInt64(&count, 1)
 		return nil
 	})
@@ -122,7 +122,7 @@ func TestRampingArrivalRateRunUnplannedVUs(t *testing.T) {
 	var count int64
 	ch := make(chan struct{})  // closed when new unplannedVU is started and signal to get to next iterations
 	ch2 := make(chan struct{}) // closed when a second iteration was started on an old VU in order to test it won't start a second unplanned VU in parallel or at all
-	runner := simpleRunner(func(ctx context.Context, _ *lib.State) error {
+	runner := simpleRunner(func(_ context.Context, _ *lib.State) error {
 		cur := atomic.AddInt64(&count, 1)
 		if cur == 1 {
 			<-ch // wait to start again
@@ -137,7 +137,7 @@ func TestRampingArrivalRateRunUnplannedVUs(t *testing.T) {
 	defer test.cancel()
 
 	engineOut := make(chan metrics.SampleContainer, 1000)
-	test.state.SetInitVUFunc(func(ctx context.Context, logger *logrus.Entry) (lib.InitializedVU, error) {
+	test.state.SetInitVUFunc(func(ctx context.Context, _ *logrus.Entry) (lib.InitializedVU, error) {
 		cur := atomic.LoadInt64(&count)
 		require.Equal(t, cur, int64(1))
 		time.Sleep(time.Second / 2)
@@ -184,7 +184,7 @@ func TestRampingArrivalRateRunCorrectRateWithSlowRate(t *testing.T) {
 
 	var count int64
 	ch := make(chan struct{}) // closed when new unplannedVU is started and signal to get to next iterations
-	runner := simpleRunner(func(ctx context.Context, _ *lib.State) error {
+	runner := simpleRunner(func(_ context.Context, _ *lib.State) error {
 		cur := atomic.AddInt64(&count, 1)
 		if cur == 1 {
 			<-ch // wait to start again
@@ -197,7 +197,7 @@ func TestRampingArrivalRateRunCorrectRateWithSlowRate(t *testing.T) {
 	defer test.cancel()
 
 	engineOut := make(chan metrics.SampleContainer, 1000)
-	test.state.SetInitVUFunc(func(ctx context.Context, logger *logrus.Entry) (lib.InitializedVU, error) {
+	test.state.SetInitVUFunc(func(ctx context.Context, _ *logrus.Entry) (lib.InitializedVU, error) {
 		t.Log("init")
 		cur := atomic.LoadInt64(&count)
 		require.Equal(t, cur, int64(1))
@@ -236,7 +236,7 @@ func TestRampingArrivalRateRunGracefulStop(t *testing.T) {
 		},
 	}
 
-	runner := simpleRunner(func(ctx context.Context, _ *lib.State) error {
+	runner := simpleRunner(func(_ context.Context, _ *lib.State) error {
 		time.Sleep(5 * time.Second)
 		return nil
 	})
@@ -268,13 +268,12 @@ func BenchmarkRampingArrivalRateRun(b *testing.B) {
 			engineOut := make(chan metrics.SampleContainer, 1000)
 			defer close(engineOut)
 			go func() {
-				for range engineOut {
-					// discard
+				for range engineOut { //nolint:revive // we want to discard samples
 				}
 			}()
 
 			var count int64
-			runner := simpleRunner(func(ctx context.Context, _ *lib.State) error {
+			runner := simpleRunner(func(_ context.Context, _ *lib.State) error {
 				atomic.AddInt64(&count, 1)
 				return nil
 			})
@@ -282,7 +281,7 @@ func BenchmarkRampingArrivalRateRun(b *testing.B) {
 			testRunState := getTestRunState(b, lib.Options{}, runner)
 			es := lib.NewExecutionState(
 				testRunState, mustNewExecutionTuple(nil, nil),
-				uint64(tc.prealloc.Int64), uint64(tc.prealloc.Int64),
+				uint64(tc.prealloc.Int64), uint64(tc.prealloc.Int64), //nolint:gosec
 			)
 
 			// an high target to get the highest rate
@@ -579,8 +578,8 @@ func sqrtRat(x *big.Rat) *big.Rat {
 	var z, a, b big.Rat
 	var ns, ds big.Int
 	ni, di := x.Num(), x.Denom()
-	z.SetFrac(ns.Rsh(ni, uint(ni.BitLen())/2), ds.Rsh(di, uint(di.BitLen())/2))
-	for i := 10; i > 0; i-- { // TODO: better termination
+	z.SetFrac(ns.Rsh(ni, uint(ni.BitLen())/2), ds.Rsh(di, uint(di.BitLen())/2)) //nolint:gosec
+	for i := 10; i > 0; i-- {                                                   // TODO: better termination
 		a.Sub(a.Mul(&z, &z), x)
 		f, _ := a.Float64()
 		if f == 0 {
@@ -698,7 +697,7 @@ func TestRampingArrivalRateGlobalIters(t *testing.T) {
 
 			gotIters := []uint64{}
 			var mx sync.Mutex
-			runner := simpleRunner(func(ctx context.Context, state *lib.State) error {
+			runner := simpleRunner(func(_ context.Context, state *lib.State) error {
 				mx.Lock()
 				gotIters = append(gotIters, state.GetScenarioGlobalVUIter())
 				mx.Unlock()
@@ -777,4 +776,40 @@ func TestRampingArrivalRateActiveVUs(t *testing.T) {
 
 	assert.GreaterOrEqual(t, running, int64(5))
 	assert.LessOrEqual(t, running, int64(10))
+}
+
+func TestRampingArrivalRateActiveVUs_GetExecutionRequirements(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]struct {
+		preAllocatedVUs    int64
+		maxVUs             int64
+		segment            string
+		sequence           string
+		expPlannedVUs      uint64
+		expMaxUnplannedVUs uint64
+	}{
+		"Segmented/Odd":     {preAllocatedVUs: 1, maxVUs: 4000, segment: "0:1/4", sequence: "0,1/4,1/2,3/4,1", expPlannedVUs: 1, expMaxUnplannedVUs: 999},
+		"Segmented/Even":    {preAllocatedVUs: 100, maxVUs: 4000, segment: "0:1/4", sequence: "0,1/4,1/2,3/4,1", expPlannedVUs: 25, expMaxUnplannedVUs: 975},
+		"NotSegmented/Odd":  {preAllocatedVUs: 1, maxVUs: 4000, segment: "0:1", sequence: "0,1", expPlannedVUs: 1, expMaxUnplannedVUs: 3999},
+		"NotSegmented/Even": {preAllocatedVUs: 100, maxVUs: 4000, segment: "0:1", sequence: "0,1", expPlannedVUs: 100, expMaxUnplannedVUs: 3900},
+	}
+
+	for name, tc := range tcs {
+		tc := tc
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			config := &RampingArrivalRateConfig{
+				PreAllocatedVUs: null.IntFrom(tc.preAllocatedVUs),
+				MaxVUs:          null.IntFrom(tc.maxVUs),
+			}
+
+			et, err := lib.NewExecutionTuple(newExecutionSegmentFromString(tc.segment), newExecutionSegmentSequenceFromString(tc.sequence))
+			require.NoError(t, err)
+
+			exp := []lib.ExecutionStep{{PlannedVUs: tc.expPlannedVUs, MaxUnplannedVUs: tc.expMaxUnplannedVUs}, {}}
+			require.Equal(t, exp, config.GetExecutionRequirements(et))
+		})
+	}
 }

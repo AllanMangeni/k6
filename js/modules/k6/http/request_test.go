@@ -14,7 +14,6 @@ import (
 	"encoding/pem"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"math/big"
 	"net"
 	"net/http"
@@ -37,11 +36,11 @@ import (
 	"github.com/stretchr/testify/require"
 	"gopkg.in/guregu/null.v3"
 
+	"go.k6.io/k6/internal/lib/testutils"
+	"go.k6.io/k6/internal/lib/testutils/httpmultibin"
 	"go.k6.io/k6/js/modulestest"
 	"go.k6.io/k6/lib"
 	"go.k6.io/k6/lib/netext"
-	"go.k6.io/k6/lib/testutils"
-	"go.k6.io/k6/lib/testutils/httpmultibin"
 	"go.k6.io/k6/metrics"
 )
 
@@ -129,8 +128,6 @@ type httpTestCase struct {
 func newTestCase(t testing.TB) *httpTestCase {
 	tb := httpmultibin.NewHTTPMultiBin(t)
 
-	root, err := lib.NewGroup("", nil)
-	require.NoError(t, err)
 	registry := metrics.NewRegistry()
 
 	logger := logrus.New()
@@ -153,13 +150,12 @@ func newTestCase(t testing.TB) *httpTestCase {
 	state := &lib.State{
 		Options:    options,
 		Logger:     logger,
-		Group:      root,
 		TLSConfig:  tb.TLSClientConfig,
 		Transport:  tb.HTTPTransport,
 		BufferPool: lib.NewBufferPool(),
 		Samples:    samples,
 		Tags: lib.NewVUStateTags(registry.RootTagSet().WithTagsFromMap(map[string]string{
-			"group": root.Path,
+			"group": lib.RootGroupPath,
 		})),
 		BuiltinMetrics: metrics.RegisterBuiltinMetrics(registry),
 	}
@@ -188,7 +184,7 @@ func TestRequest(t *testing.T) {
 	sr := tb.Replacer.Replace
 
 	// Handle paths with custom logic
-	tb.Mux.HandleFunc("/digest-auth/failure", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	tb.Mux.HandleFunc("/digest-auth/failure", http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) {
 		time.Sleep(2 * time.Second)
 	}))
 
@@ -274,7 +270,7 @@ func TestRequest(t *testing.T) {
 		t.Run("post body", func(t *testing.T) {
 			tb.Mux.HandleFunc("/post-redirect", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				require.Equal(t, r.Method, "POST")
-				_, _ = io.Copy(ioutil.Discard, r.Body)
+				_, _ = io.Copy(io.Discard, r.Body)
 				http.Redirect(w, r, sr("HTTPBIN_URL/post"), http.StatusPermanentRedirect)
 			}))
 			_, err := rt.RunString(sr(`
@@ -447,7 +443,7 @@ func TestRequest(t *testing.T) {
 		})
 		t.Run("custom compression", func(t *testing.T) {
 			// We should not try to decode it
-			tb.Mux.HandleFunc("/customcompression", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			tb.Mux.HandleFunc("/customcompression", http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 				w.Header().Set("Content-Encoding", "custom")
 				_, err := w.Write([]byte(`{"custom": true}`))
 				assert.NoError(t, err)
@@ -574,7 +570,7 @@ func TestRequest(t *testing.T) {
 			logEntry := ts.hook.LastEntry()
 			require.NotNil(t, logEntry)
 			assert.Equal(t, logrus.WarnLevel, logEntry.Level)
-			assert.Contains(t, logEntry.Data["error"].(error).Error(), expErr)
+			assert.ErrorContains(t, logEntry.Data["error"].(error), expErr)
 			assert.Equal(t, "Request Failed", logEntry.Message)
 		})
 
@@ -600,7 +596,7 @@ func TestRequest(t *testing.T) {
 			logEntry := ts.hook.LastEntry()
 			require.NotNil(t, logEntry)
 			assert.Equal(t, logrus.WarnLevel, logEntry.Level)
-			assert.Contains(t, logEntry.Data["error"].(error).Error(), expErr)
+			assert.ErrorContains(t, logEntry.Data["error"].(error), expErr)
 			assert.Equal(t, "Request Failed", logEntry.Message)
 		})
 	})
@@ -697,7 +693,7 @@ func TestRequest(t *testing.T) {
 			t.Run("redirect", func(t *testing.T) {
 				t.Run("set cookie after redirect", func(t *testing.T) {
 					// TODO figure out a way to remove this ?
-					tb.Mux.HandleFunc("/set-cookie-without-redirect", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					tb.Mux.HandleFunc("/set-cookie-without-redirect", http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 						cookie := http.Cookie{
 							Name:   "key-foo",
 							Value:  "value-bar",
@@ -909,7 +905,6 @@ func TestRequest(t *testing.T) {
 				assertRequestMetricsEmitted(t, metrics.GetBufferedSamples(samples), "GET", sr("HTTPBIN_URL/cookies"), 200, "")
 			})
 
-			//nolint:paralleltest
 			t.Run("clear", func(t *testing.T) {
 				cookieJar, err := cookiejar.New(nil)
 				assert.NoError(t, err)
@@ -927,7 +922,6 @@ func TestRequest(t *testing.T) {
 				assertRequestMetricsEmitted(t, metrics.GetBufferedSamples(samples), "GET", sr("HTTPBIN_URL/cookies"), 200, "")
 			})
 
-			//nolint:paralleltest
 			t.Run("delete", func(t *testing.T) {
 				cookieJar, err := cookiejar.New(nil)
 				assert.NoError(t, err)
@@ -1409,7 +1403,7 @@ func TestRequestCompression(t *testing.T) {
 		expectedEncoding string
 		actualEncoding   string
 	)
-	tb.Mux.HandleFunc("/compressed-text", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	tb.Mux.HandleFunc("/compressed-text", http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
 		require.Equal(t, expectedEncoding, r.Header.Get("Content-Encoding"))
 
 		expectedLength, err := strconv.Atoi(r.Header.Get("Content-Length"))
@@ -1559,13 +1553,13 @@ func TestResponseTypes(t *testing.T) {
 
 	text := `•?((¯°·._.• ţ€$ţɨɲǥ µɲɨȼ๏ď€ ɨɲ Ќ6 •._.·°¯))؟•`
 	textLen := len(text)
-	tb.Mux.HandleFunc("/get-text", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	tb.Mux.HandleFunc("/get-text", http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		n, err := w.Write([]byte(text))
 		assert.NoError(t, err)
 		assert.Equal(t, textLen, n)
 	}))
-	tb.Mux.HandleFunc("/compare-text", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		body, err := ioutil.ReadAll(r.Body)
+	tb.Mux.HandleFunc("/compare-text", http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		body, err := io.ReadAll(r.Body)
 		require.NoError(t, err)
 		assert.Equal(t, text, string(body))
 	}))
@@ -1575,13 +1569,13 @@ func TestResponseTypes(t *testing.T) {
 	for i := 0; i < binaryLen; i++ {
 		binary[i] = byte(i)
 	}
-	tb.Mux.HandleFunc("/get-bin", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	tb.Mux.HandleFunc("/get-bin", http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		n, err := w.Write(binary)
 		assert.NoError(t, err)
 		assert.Equal(t, binaryLen, n)
 	}))
-	tb.Mux.HandleFunc("/compare-bin", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		body, err := ioutil.ReadAll(r.Body)
+	tb.Mux.HandleFunc("/compare-bin", http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		body, err := io.ReadAll(r.Body)
 		require.NoError(t, err)
 		assert.True(t, bytes.Equal(binary, body))
 	}))
@@ -1817,7 +1811,7 @@ func TestResponseWaitingAndReceivingTimings(t *testing.T) {
 	// We don't expect any failed requests
 	state.Options.Throw = null.BoolFrom(true)
 
-	tb.Mux.HandleFunc("/slow-response", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	tb.Mux.HandleFunc("/slow-response", http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		flusher, ok := w.(http.Flusher)
 		require.True(t, ok)
 
@@ -1977,7 +1971,7 @@ func BenchmarkHandlingOfResponseBodies(b *testing.B) {
 	}()
 
 	mbData := bytes.Repeat([]byte("0123456789"), 100000)
-	tb.Mux.HandleFunc("/1mbdata", http.HandlerFunc(func(resp http.ResponseWriter, req *http.Request) {
+	tb.Mux.HandleFunc("/1mbdata", http.HandlerFunc(func(resp http.ResponseWriter, _ *http.Request) {
 		_, err := resp.Write(mbData)
 		if err != nil {
 			b.Error(err)
@@ -2011,7 +2005,7 @@ func BenchmarkHandlingOfResponseBodies(b *testing.B) {
 	`)
 
 	testResponseType := func(responseType string) func(b *testing.B) {
-		testCode := strings.Replace(testCodeTemplate, "TEST_RESPONSE_TYPE", responseType, -1)
+		testCode := strings.ReplaceAll(testCodeTemplate, "TEST_RESPONSE_TYPE", responseType)
 		return func(b *testing.B) {
 			for i := 0; i < b.N; i++ {
 				_, err := rt.RunString(testCode)
@@ -2087,7 +2081,7 @@ func TestRequestAndBatchTLS(t *testing.T) {
 				return hosts
 			}(),
 		}
-		client.Transport.(*http.Transport).DialContext = state.Dialer.DialContext //nolint:forcetypeassert
+		client.Transport.(*http.Transport).DialContext = state.Dialer.DialContext
 		_, err = rt.RunString(`throw JSON.stringify(http.get("https://expired.localhost/"));`)
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "x509: certificate has expired or is not yet valid")
@@ -2121,6 +2115,7 @@ func TestRequestAndBatchTLS(t *testing.T) {
 			default:
 				panic(versionTest.Name + " unsupported")
 			}
+			s.TLS.MinVersion = tls.VersionTLS10
 			go func() {
 				_ = s.Config.Serve(s.Listener)
 			}()
@@ -2139,7 +2134,7 @@ func TestRequestAndBatchTLS(t *testing.T) {
 			state.Dialer = &netext.Dialer{Hosts: hosts}
 			state.Transport = client.Transport
 			state.TLSConfig = s.TLS
-			client.Transport.(*http.Transport).DialContext = state.Dialer.DialContext //nolint:forcetypeassert
+			client.Transport.(*http.Transport).DialContext = state.Dialer.DialContext
 			realURL := "https://" + versionTest.URL + "/"
 			_, err = rt.RunString(fmt.Sprintf(`
             var res = http.get("%s");
@@ -2184,7 +2179,7 @@ func TestRequestAndBatchTLS(t *testing.T) {
 			state.Dialer = &netext.Dialer{Hosts: hosts}
 			state.Transport = client.Transport
 			state.TLSConfig = s.TLS
-			client.Transport.(*http.Transport).DialContext = state.Dialer.DialContext //nolint:forcetypeassert
+			client.Transport.(*http.Transport).DialContext = state.Dialer.DialContext
 			realURL := "https://" + cipherSuiteTest.URL + "/"
 			_, err = rt.RunString(fmt.Sprintf(`
 					var res = http.get("%s");
@@ -2228,7 +2223,7 @@ func TestDigestAuthWithBody(t *testing.T) {
 
 	tb.Mux.HandleFunc("/digest-auth-with-post/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		require.Equal(t, "POST", r.Method)
-		body, err := ioutil.ReadAll(r.Body)
+		body, err := io.ReadAll(r.Body)
 		require.NoError(t, err)
 		require.Equal(t, "super secret body", string(body))
 		httpbin.New().DigestAuth(w, r) // this doesn't read the body
@@ -2325,9 +2320,9 @@ func GenerateTLSCertificate(t *testing.T, host string, notBefore time.Time, vali
 	return certPem, keyPem
 }
 
-func GetTestServerWithCertificate(t *testing.T, certPem, key []byte, suitesIds ...uint16) (*httptest.Server, *http.Client) {
+func GetTestServerWithCertificate(t *testing.T, certPem, key []byte, suitesIDs ...uint16) (*httptest.Server, *http.Client) {
 	server := &http.Server{
-		Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		Handler: http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 			w.WriteHeader(http.StatusOK)
 		}),
 		ReadHeaderTimeout: time.Second,
@@ -2348,10 +2343,10 @@ func GetTestServerWithCertificate(t *testing.T, certPem, key []byte, suitesIds .
 	require.NoError(t, err)
 	s.TLS.Certificates = append(s.TLS.Certificates, cert)
 	suites := tls.CipherSuites()
-	if len(suitesIds) > 0 {
-		newSuites := make([]*tls.CipherSuite, 0, len(suitesIds))
+	if len(suitesIDs) > 0 {
+		newSuites := make([]*tls.CipherSuite, 0, len(suitesIDs))
 		for _, suite := range suites {
-			for _, id := range suitesIds {
+			for _, id := range suitesIDs {
 				if id == suite.ID {
 					newSuites = append(newSuites, suite)
 				}
@@ -2375,7 +2370,7 @@ func GetTestServerWithCertificate(t *testing.T, certPem, key []byte, suitesIds .
 			RootCAs:      certpool,
 			MinVersion:   tls.VersionTLS10,
 			MaxVersion:   tls.VersionTLS12, // this so that the ciphersuite work
-			CipherSuites: suitesIds,
+			CipherSuites: suitesIDs,
 		},
 		ForceAttemptHTTP2:     s.EnableHTTP2,
 		TLSHandshakeTimeout:   time.Second,
@@ -2386,4 +2381,27 @@ func GetTestServerWithCertificate(t *testing.T, certPem, key []byte, suitesIds .
 	require.NoError(t, err)
 	s.Listener = tls.NewListener(s.Listener, s.TLS)
 	return s, client
+}
+
+func TestGzipped204Response(t *testing.T) {
+	t.Parallel()
+	ts := newTestCase(t)
+	tb := ts.tb
+	rt := ts.runtime.VU.Runtime()
+	state := ts.runtime.VU.State()
+	state.Options.Throw = null.BoolFrom(true)
+	sr := tb.Replacer.Replace
+	// We should not try to decode it
+	tb.Mux.HandleFunc("/gzipempty", http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Encoding", "gzip")
+		w.WriteHeader(http.StatusNoContent)
+	}))
+
+	_, err := rt.RunString(sr(`
+				var res = http.get("HTTPBIN_URL/gzipempty");
+				if (res.status != 204) {
+					throw new Error("unexpected status code: " + res.status)
+				}
+			`))
+	assert.NoError(t, err)
 }

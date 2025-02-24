@@ -10,12 +10,14 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"go.k6.io/k6/execution"
+	"go.k6.io/k6/internal/execution"
+	"go.k6.io/k6/internal/execution/local"
+	"go.k6.io/k6/internal/lib/testutils"
+	"go.k6.io/k6/internal/lib/testutils/minirunner"
+	"go.k6.io/k6/internal/metrics/engine"
+	"go.k6.io/k6/internal/usage"
 	"go.k6.io/k6/lib"
-	"go.k6.io/k6/lib/testutils"
-	"go.k6.io/k6/lib/testutils/minirunner"
 	"go.k6.io/k6/metrics"
-	"go.k6.io/k6/metrics/engine"
 )
 
 func getTestPreInitState(tb testing.TB) *lib.TestPreInitState {
@@ -26,6 +28,7 @@ func getTestPreInitState(tb testing.TB) *lib.TestPreInitState {
 		RuntimeOptions: lib.RuntimeOptions{},
 		Registry:       reg,
 		BuiltinMetrics: metrics.RegisterBuiltinMetrics(reg),
+		Usage:          usage.New(),
 	}
 }
 
@@ -36,15 +39,16 @@ func getTestRunState(tb testing.TB, options lib.Options, runner lib.Runner) *lib
 		TestPreInitState: piState,
 		Options:          options,
 		Runner:           runner,
+		GroupSummary:     lib.NewGroupSummary(piState.Logger),
 		RunTags:          piState.Registry.RootTagSet().WithTagsFromMap(options.RunTags),
 	}
 }
 
 func getControlSurface(tb testing.TB, testState *lib.TestRunState) *ControlSurface {
-	execScheduler, err := execution.NewScheduler(testState)
+	execScheduler, err := execution.NewScheduler(testState, local.NewController())
 	require.NoError(tb, err)
 
-	me, err := engine.NewMetricsEngine(testState)
+	me, err := engine.NewMetricsEngine(testState.Registry, testState.Logger)
 	require.NoError(tb, err)
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -61,6 +65,32 @@ func getControlSurface(tb testing.TB, testState *lib.TestRunState) *ControlSurfa
 }
 
 func TestGetGroups(t *testing.T) {
+	t.Parallel()
+
+	cs := getControlSurface(t, getTestRunState(t, lib.Options{}, &minirunner.MiniRunner{}))
+	require.NoError(t, cs.RunState.GroupSummary.Start())
+	cs.RunState.GroupSummary.AddMetricSamples([]metrics.SampleContainer{
+		metrics.Sample{
+			TimeSeries: metrics.TimeSeries{
+				Metric: cs.RunState.BuiltinMetrics.GroupDuration,
+				Tags:   cs.RunState.Registry.RootTagSet().With("group", "::group 1"),
+			},
+		},
+		metrics.Sample{
+			TimeSeries: metrics.TimeSeries{
+				Metric: cs.RunState.BuiltinMetrics.GroupDuration,
+				Tags:   cs.RunState.Registry.RootTagSet().With("group", ""),
+			},
+		},
+		metrics.Sample{
+			TimeSeries: metrics.TimeSeries{
+				Metric: cs.RunState.BuiltinMetrics.GroupDuration,
+				Tags:   cs.RunState.Registry.RootTagSet().With("group", "::group 1::group 2"),
+			},
+		},
+	})
+	require.NoError(t, cs.RunState.GroupSummary.Stop())
+
 	g0, err := lib.NewGroup("", nil)
 	assert.NoError(t, err)
 	g1, err := g0.Group("group 1")
@@ -68,17 +98,22 @@ func TestGetGroups(t *testing.T) {
 	g2, err := g1.Group("group 2")
 	assert.NoError(t, err)
 
-	cs := getControlSurface(t, getTestRunState(t, lib.Options{}, &minirunner.MiniRunner{Group: g0}))
-
 	t.Run("list", func(t *testing.T) {
+		t.Parallel()
+
 		rw := httptest.NewRecorder()
 		NewHandler(cs).ServeHTTP(rw, httptest.NewRequest(http.MethodGet, "/v1/groups", nil))
 		res := rw.Result()
+		t.Cleanup(func() {
+			assert.NoError(t, res.Body.Close())
+		})
 		body := rw.Body.Bytes()
 		assert.Equal(t, http.StatusOK, res.StatusCode)
 		assert.NotEmpty(t, body)
 
 		t.Run("document", func(t *testing.T) {
+			t.Parallel()
+
 			var doc groupsJSONAPI
 			assert.NoError(t, json.Unmarshal(body, &doc))
 			if assert.NotEmpty(t, doc.Data) {
@@ -87,6 +122,8 @@ func TestGetGroups(t *testing.T) {
 		})
 
 		t.Run("groups", func(t *testing.T) {
+			t.Parallel()
+
 			var envelop groupsJSONAPI
 			require.NoError(t, json.Unmarshal(body, &envelop))
 			require.Len(t, envelop.Data, 3)
@@ -118,10 +155,15 @@ func TestGetGroups(t *testing.T) {
 		})
 	})
 	for _, gp := range []*lib.Group{g0, g1, g2} {
+		gp := gp
 		t.Run(gp.Name, func(t *testing.T) {
+			t.Parallel()
 			rw := httptest.NewRecorder()
 			NewHandler(cs).ServeHTTP(rw, httptest.NewRequest(http.MethodGet, "/v1/groups/"+gp.ID, nil))
 			res := rw.Result()
+			t.Cleanup(func() {
+				assert.NoError(t, res.Body.Close())
+			})
 			assert.Equal(t, http.StatusOK, res.StatusCode)
 		})
 	}

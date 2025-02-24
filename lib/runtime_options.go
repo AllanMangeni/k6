@@ -9,25 +9,26 @@ import (
 
 // CompatibilityMode specifies the JS compatibility mode
 //
-//nolint:lll
 //go:generate enumer -type=CompatibilityMode -transform=snake -trimprefix CompatibilityMode -output compatibility_mode_gen.go
 type CompatibilityMode uint8
 
 const (
-	// CompatibilityModeExtended achieves ES6+ compatibility with Babel
+	// CompatibilityModeExtended adds `global` as an alias for `globalThis` on top of the base mode
 	CompatibilityModeExtended CompatibilityMode = iota + 1
-	// CompatibilityModeBase is standard goja ES5.1+
+	// CompatibilityModeBase is standard Sobek, which means pure vanilla JS following ECMAScript standards.
 	CompatibilityModeBase
+	// CompatibilityModeExperimentalEnhanced achieves TypeScript and ES6+ compatibility with esbuild
+	CompatibilityModeExperimentalEnhanced
 )
 
-// RuntimeOptions are settings passed onto the goja JS runtime
+// RuntimeOptions are settings passed onto the Sobek JS runtime
 type RuntimeOptions struct {
 	TestType null.String `json:"-"`
 
 	// Whether to pass the actual system environment variables to the JS runtime
 	IncludeSystemEnvVars null.Bool `json:"includeSystemEnvVars"`
 
-	// JS compatibility mode: "extended" (Goja+Babel) or "base" (plain Goja)
+	// JS compatibility mode: "extended" (Sobek+global) or "base" (plain Sobek)
 	//
 	// TODO: when we resolve https://github.com/k6io/k6/issues/883, we probably
 	// should use the CompatibilityMode type directly... but by then, we'd need to have
@@ -42,6 +43,7 @@ type RuntimeOptions struct {
 	NoSummary     null.Bool   `json:"noSummary"`
 	SummaryExport null.String `json:"summaryExport"`
 	KeyWriter     null.String `json:"-"`
+	TracesOutput  null.String `json:"tracesOutput"`
 }
 
 // ValidateCompatibilityMode checks if the provided val is a valid compatibility mode

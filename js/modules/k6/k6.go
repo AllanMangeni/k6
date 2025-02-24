@@ -3,15 +3,15 @@ package k6
 
 import (
 	"errors"
-	"fmt"
 	"math/rand"
-	"sync/atomic"
+	"strings"
 	"time"
 
-	"github.com/dop251/goja"
+	"github.com/grafana/sobek"
 
 	"go.k6.io/k6/js/common"
 	"go.k6.io/k6/js/modules"
+	"go.k6.io/k6/lib"
 	"go.k6.io/k6/metrics"
 )
 
@@ -22,9 +22,6 @@ var (
 	// ErrCheckInInitContext is returned when check() are using in the init context.
 	ErrCheckInInitContext = common.NewInitContextError("Using check() in the init context is not supported")
 )
-
-const asyncFunctionNotSupportedMsg = "%s() does not support async functions as arguments, " +
-	"please see https://k6.io/docs/javascript-api/k6/group/#working-with-async-functions for more info"
 
 type (
 	// RootModule is the global module instance that will create module
@@ -67,8 +64,8 @@ func (mi *K6) Exports() modules.Exports {
 }
 
 // Fail is a fancy way of saying `throw "something"`.
-func (*K6) Fail(msg string) (goja.Value, error) {
-	return goja.Undefined(), errors.New(msg)
+func (*K6) Fail(msg string) (sobek.Value, error) {
+	return sobek.Undefined(), errors.New(msg)
 }
 
 // Sleep waits the provided seconds before continuing the execution.
@@ -88,15 +85,8 @@ func (mi *K6) RandomSeed(seed int64) {
 	mi.vu.Runtime().SetRandSource(randSource)
 }
 
-func isAsyncFunction(rt *goja.Runtime, val goja.Value) bool {
-	if common.IsNullish(val) {
-		return false
-	}
-	return val.ToObject(rt).Get("constructor").ToObject(rt).Get("name").String() == "AsyncFunction"
-}
-
 // Group wraps a function call and executes it within the provided group name.
-func (mi *K6) Group(name string, val goja.Value) (goja.Value, error) {
+func (mi *K6) Group(name string, val sobek.Value) (sobek.Value, error) {
 	state := mi.vu.State()
 	if state == nil {
 		return nil, ErrGroupInInitContext
@@ -105,38 +95,37 @@ func (mi *K6) Group(name string, val goja.Value) (goja.Value, error) {
 	if common.IsNullish(val) {
 		return nil, errors.New("group() requires a callback as a second argument")
 	}
-	fn, ok := goja.AssertFunction(val)
+	fn, ok := sobek.AssertFunction(val)
 	if !ok {
 		return nil, errors.New("group() requires a callback as a second argument")
 	}
-	if isAsyncFunction(mi.vu.Runtime(), val) {
-		return goja.Undefined(), fmt.Errorf(asyncFunctionNotSupportedMsg, "group")
+	if common.IsAsyncFunction(mi.vu.Runtime(), val) {
+		return sobek.Undefined(), errors.New("group() does not support async functions as arguments, " +
+			"please see https://grafana.com/docs/k6/latest/javascript-api/k6/group/ for more info")
 	}
-	g, err := state.Group.Group(name)
+	oldGroupName, _ := state.Tags.GetCurrentValues().Tags.Get(metrics.TagGroup.String())
+	// TODO: what are we doing if group is not tagged
+	newGroupName, err := lib.NewGroupPath(oldGroupName, name)
 	if err != nil {
-		return goja.Undefined(), err
+		return sobek.Undefined(), err
 	}
-
-	old := state.Group
-	state.Group = g
 
 	shouldUpdateTag := state.Options.SystemTags.Has(metrics.TagGroup)
 	if shouldUpdateTag {
 		state.Tags.Modify(func(tagsAndMeta *metrics.TagsAndMeta) {
-			tagsAndMeta.SetSystemTagOrMeta(metrics.TagGroup, g.Path)
+			tagsAndMeta.SetSystemTagOrMeta(metrics.TagGroup, newGroupName)
 		})
 	}
 	defer func() {
-		state.Group = old
 		if shouldUpdateTag {
 			state.Tags.Modify(func(tagsAndMeta *metrics.TagsAndMeta) {
-				tagsAndMeta.SetSystemTagOrMeta(metrics.TagGroup, old.Path)
+				tagsAndMeta.SetSystemTagOrMeta(metrics.TagGroup, oldGroupName)
 			})
 		}
 	}()
 
 	startTime := time.Now()
-	ret, err := fn(goja.Undefined())
+	ret, err := fn(sobek.Undefined())
 	t := time.Now()
 
 	ctx := mi.vu.Context()
@@ -155,9 +144,7 @@ func (mi *K6) Group(name string, val goja.Value) (goja.Value, error) {
 }
 
 // Check will emit check metrics for the provided checks.
-//
-//nolint:cyclop
-func (mi *K6) Check(arg0, checks goja.Value, extras ...goja.Value) (bool, error) {
+func (mi *K6) Check(arg0, checks sobek.Value, extras ...sobek.Value) (bool, error) {
 	state := mi.vu.State()
 	if state == nil {
 		return false, ErrCheckInInitContext
@@ -181,27 +168,26 @@ func (mi *K6) Check(arg0, checks goja.Value, extras ...goja.Value) (bool, error)
 	var exc error
 	obj := checks.ToObject(rt)
 	for _, name := range obj.Keys() {
-		val := obj.Get(name)
-
-		// Resolve the check record.
-		check, err := state.Group.Check(name)
-		if err != nil {
-			return false, err
+		if strings.Contains(name, lib.GroupSeparator) {
+			return false, lib.ErrNameContainsGroupSeparator
 		}
+		val := obj.Get(name)
 
 		tags := commonTagsAndMeta.Tags
 		if state.Options.SystemTags.Has(metrics.TagCheck) {
-			tags = tags.With("check", check.Name)
+			tags = tags.With("check", name)
 		}
 
-		if isAsyncFunction(rt, val) {
-			return false, fmt.Errorf(asyncFunctionNotSupportedMsg, "check")
+		if common.IsAsyncFunction(rt, val) {
+			return false, errors.New("the built-in check() does not support async functions as arguments. " +
+				"Use the JavaScript utils library as a replacement. " +
+				"Refer to https://grafana.com/docs/k6/latest/javascript-api/jslib/utils/check/ for more info")
 		}
 
 		// Resolve callables into values.
-		fn, ok := goja.AssertFunction(val)
+		fn, ok := sobek.AssertFunction(val)
 		if ok {
-			tmpVal, err := fn(goja.Undefined(), arg0)
+			tmpVal, err := fn(sobek.Undefined(), arg0)
 			val = tmpVal
 			if err != nil {
 				val = rt.ToValue(false)
@@ -214,28 +200,19 @@ func (mi *K6) Check(arg0, checks goja.Value, extras ...goja.Value) (bool, error)
 			succ = false
 		}
 
-		// Emit! (But only if we have a valid context.)
-		select {
-		case <-ctx.Done():
-		default:
-			sample := metrics.Sample{
-				TimeSeries: metrics.TimeSeries{
-					Metric: state.BuiltinMetrics.Checks,
-					Tags:   tags,
-				},
-				Time:     t,
-				Metadata: commonTagsAndMeta.Metadata,
-				Value:    0,
-			}
-			if booleanVal {
-				atomic.AddInt64(&check.Passes, 1)
-				sample.Value = 1
-			} else {
-				atomic.AddInt64(&check.Fails, 1)
-			}
-
-			metrics.PushIfNotDone(ctx, state.Samples, sample)
+		sample := metrics.Sample{
+			TimeSeries: metrics.TimeSeries{
+				Metric: state.BuiltinMetrics.Checks,
+				Tags:   tags,
+			},
+			Time:     t,
+			Metadata: commonTagsAndMeta.Metadata,
 		}
+		if booleanVal {
+			sample.Value = 1
+		}
+
+		metrics.PushIfNotDone(ctx, state.Samples, sample)
 
 		if exc != nil {
 			return false, exc

@@ -10,10 +10,10 @@ import (
 	"github.com/sirupsen/logrus"
 	"gopkg.in/guregu/null.v3"
 
+	"go.k6.io/k6/internal/ui/pb"
 	"go.k6.io/k6/lib"
 	"go.k6.io/k6/lib/types"
 	"go.k6.io/k6/metrics"
-	"go.k6.io/k6/ui/pb"
 )
 
 const rampingVUsType = "ramping-vus"
@@ -86,7 +86,10 @@ func (vlvc RampingVUsConfig) Validate() []error {
 		errors = append(errors, fmt.Errorf("either startVUs or one of the stages' target values must be greater than 0"))
 	}
 
-	return append(errors, validateStages(vlvc.Stages)...)
+	errors = append(errors, validateStages(vlvc.Stages)...)
+	errors = append(errors, validateTargetShifts(vlvc.StartVUs.Int64, vlvc.Stages)...)
+
+	return errors
 }
 
 // getRawExecutionSteps calculates and returns as execution steps the number of
@@ -175,7 +178,7 @@ func (vlvc RampingVUsConfig) getRawExecutionSteps(et *lib.ExecutionTuple, zeroEn
 
 	// Reserve the scaled StartVUs at the beginning
 	scaled, unscaled := index.GoTo(fromVUs)
-	steps = append(steps, lib.ExecutionStep{TimeOffset: 0, PlannedVUs: uint64(scaled)})
+	steps = append(steps, lib.ExecutionStep{TimeOffset: 0, PlannedVUs: uint64(scaled)}) //nolint:gosec
 	addStep := func(timeOffset time.Duration, plannedVUs uint64) {
 		if steps[len(steps)-1].PlannedVUs != plannedVUs {
 			steps = append(steps, lib.ExecutionStep{TimeOffset: timeOffset, PlannedVUs: plannedVUs})
@@ -193,7 +196,7 @@ func (vlvc RampingVUsConfig) getRawExecutionSteps(et *lib.ExecutionTuple, zeroEn
 		}
 		if stageDuration == 0 {
 			scaled, unscaled = index.GoTo(stageEndVUs)
-			addStep(timeTillEnd, uint64(scaled))
+			addStep(timeTillEnd, uint64(scaled)) //nolint:gosec
 			fromVUs = stageEndVUs
 			continue
 		}
@@ -209,14 +212,14 @@ func (vlvc RampingVUsConfig) getRawExecutionSteps(et *lib.ExecutionTuple, zeroEn
 					// but we are ramping down so we should go 1 down, but because we want to not
 					// stop VUs immediately we stop it on the next unscaled VU's time
 					timeTillEnd-time.Duration(int64(stageDuration)*(stageEndVUs-unscaled+1)/stageVUDiff),
-					uint64(scaled-1),
+					uint64(scaled-1), //nolint:gosec
 				)
 			}
 		} else {
 			for ; unscaled <= stageEndVUs; scaled, unscaled = index.Next() {
 				addStep(
 					timeTillEnd-time.Duration(int64(stageDuration)*(stageEndVUs-unscaled)/stageVUDiff),
-					uint64(scaled),
+					uint64(scaled), //nolint:gosec
 				)
 			}
 		}
@@ -301,7 +304,7 @@ func (vlvc RampingVUsConfig) precalculateTheRequiredSteps(et *lib.ExecutionTuple
 // executorEndOffset, is not handled here. Instead GetExecutionRequirements()
 // takes care of that. But to make its job easier, this method won't add any
 // steps with an offset that's greater or equal to executorEndOffset.
-func (vlvc RampingVUsConfig) reserveVUsForGracefulRampDowns( //nolint:funlen
+func (vlvc RampingVUsConfig) reserveVUsForGracefulRampDowns(
 	rawSteps []lib.ExecutionStep, executorEndOffset time.Duration,
 ) []lib.ExecutionStep {
 	rawStepsLen := len(rawSteps)
@@ -571,7 +574,7 @@ type rampingVUsRunState struct {
 }
 
 func (rs *rampingVUsRunState) makeProgressFn(regular time.Duration) (progressFn func() (float64, []string)) {
-	vusFmt := pb.GetFixedLengthIntFormat(int64(rs.maxVUs))
+	vusFmt := pb.GetFixedLengthIntFormat(int64(rs.maxVUs)) //nolint:gosec
 	regularDuration := pb.GetFixedLengthDuration(regular, regular)
 
 	return func() (float64, []string) {
@@ -609,7 +612,7 @@ func (rs *rampingVUsRunState) runLoopsIfPossible(ctx context.Context, cancel fun
 		rs.vuHandles[i] = newStoppedVUHandle(
 			ctx, getVU, returnVU, rs.executor.nextIterationCounters,
 			&rs.executor.config.BaseConfig, rs.executor.logger.WithField("vuNum", i))
-		go rs.vuHandles[i].runLoopsIfPossible(rs.runIteration)
+		go rs.vuHandles[i].runLoopsIfPossible(rs.runIteration) //nolint:contextcheck
 	}
 }
 

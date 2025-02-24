@@ -2,12 +2,12 @@ package cloudapi
 
 import (
 	"bytes"
+	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
-	"io/ioutil"
-	"math/rand"
 	"net/http"
 	"time"
 
@@ -20,7 +20,7 @@ const (
 	// MaxRetries specifies max retry attempts
 	MaxRetries = 3
 
-	k6IdempotencyKeyHeader = "k6-Idempotency-Key"
+	k6IdempotencyKeyHeader = "K6-Idempotency-Key"
 )
 
 // Client handles communication with the k6 Cloud API.
@@ -50,6 +50,11 @@ func NewClient(logger logrus.FieldLogger, token, host, version string, timeout t
 	return c
 }
 
+// BaseURL returns configured host.
+func (c *Client) BaseURL() string {
+	return c.baseURL
+}
+
 // NewRequest creates new HTTP request.
 //
 // This is the same as http.NewRequest, except that data if not nil
@@ -66,7 +71,7 @@ func (c *Client) NewRequest(method, url string, data interface{}) (*http.Request
 		buf = bytes.NewBuffer(b)
 	}
 
-	req, err := http.NewRequest(method, url, buf)
+	req, err := http.NewRequest(method, url, buf) //nolint:noctx // the user can add this
 	if err != nil {
 		return nil, err
 	}
@@ -74,9 +79,10 @@ func (c *Client) NewRequest(method, url string, data interface{}) (*http.Request
 	return req, nil
 }
 
+// Do is simpler to http.Do but also unmarshals the response in the provided v
 func (c *Client) Do(req *http.Request, v interface{}) error {
 	if req.Body != nil && req.GetBody == nil {
-		originalBody, err := ioutil.ReadAll(req.Body)
+		originalBody, err := io.ReadAll(req.Body)
 		if err != nil {
 			return err
 		}
@@ -85,7 +91,7 @@ func (c *Client) Do(req *http.Request, v interface{}) error {
 		}
 
 		req.GetBody = func() (io.ReadCloser, error) {
-			return ioutil.NopCloser(bytes.NewReader(originalBody)), nil
+			return io.NopCloser(bytes.NewReader(originalBody)), nil
 		}
 		req.Body, _ = req.GetBody()
 	}
@@ -131,6 +137,7 @@ func (c *Client) do(req *http.Request, v interface{}, attempt int) (retry bool, 
 
 	defer func() {
 		if resp != nil {
+			_, _ = io.Copy(io.Discard, resp.Body)
 			if cerr := resp.Body.Close(); cerr != nil && err == nil {
 				err = cerr
 			}
@@ -145,12 +152,12 @@ func (c *Client) do(req *http.Request, v interface{}, attempt int) (retry bool, 
 		return false, err
 	}
 
-	if err = checkResponse(resp); err != nil {
+	if err = CheckResponse(resp); err != nil {
 		return false, err
 	}
 
 	if v != nil {
-		if err = json.NewDecoder(resp.Body).Decode(v); err == io.EOF {
+		if err = json.NewDecoder(resp.Body).Decode(v); errors.Is(err, io.EOF) {
 			err = nil // Ignore EOF from empty body
 		}
 	}
@@ -158,7 +165,10 @@ func (c *Client) do(req *http.Request, v interface{}, attempt int) (retry bool, 
 	return false, err
 }
 
-func checkResponse(r *http.Response) error {
+// CheckResponse checks the parsed response.
+// It returns nil if the code is in the successful range,
+// otherwise it tries to parse the body and return a parsed error.
+func CheckResponse(r *http.Response) error {
 	if r == nil {
 		return errUnknown
 	}
@@ -167,13 +177,13 @@ func checkResponse(r *http.Response) error {
 		return nil
 	}
 
-	data, err := ioutil.ReadAll(r.Body)
+	data, err := io.ReadAll(r.Body)
 	if err != nil {
 		return err
 	}
 
 	var payload struct {
-		Error ErrorResponse `json:"error"`
+		Error ResponseError `json:"error"`
 	}
 	if err := json.Unmarshal(data, &payload); err != nil {
 		if r.StatusCode == http.StatusUnauthorized {
@@ -202,7 +212,7 @@ func shouldRetry(resp *http.Response, err error, attempt, maxAttempts int) bool 
 		return true
 	}
 
-	if resp.StatusCode >= 500 || resp.StatusCode == 429 {
+	if resp.StatusCode >= 500 || resp.StatusCode == http.StatusTooManyRequests {
 		return true
 	}
 
@@ -220,15 +230,9 @@ func shouldAddIdempotencyKey(req *http.Request) bool {
 
 // randomStrHex returns a hex string which can be used
 // for session token id or idempotency key.
-//
-//nolint:gosec
 func randomStrHex() string {
 	// 16 hex characters
 	b := make([]byte, 8)
 	_, _ = rand.Read(b)
 	return hex.EncodeToString(b)
-}
-
-func init() {
-	rand.Seed(time.Now().UTC().UnixNano())
 }
