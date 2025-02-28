@@ -11,10 +11,10 @@ import (
 	"github.com/sirupsen/logrus"
 	"gopkg.in/guregu/null.v3"
 
+	"go.k6.io/k6/internal/ui/pb"
 	"go.k6.io/k6/lib"
 	"go.k6.io/k6/lib/types"
 	"go.k6.io/k6/metrics"
-	"go.k6.io/k6/ui/pb"
 )
 
 const rampingArrivalRateType = "ramping-arrival-rate"
@@ -91,7 +91,7 @@ func (varc *RampingArrivalRateConfig) Validate() []error {
 		errors = append(errors, fmt.Errorf("the startRate value can't be negative"))
 	}
 
-	if varc.TimeUnit.TimeDuration() < 0 {
+	if varc.TimeUnit.TimeDuration() <= 0 {
 		errors = append(errors, fmt.Errorf("the timeUnit must be more than 0"))
 	}
 
@@ -122,8 +122,8 @@ func (varc RampingArrivalRateConfig) GetExecutionRequirements(et *lib.ExecutionT
 	return []lib.ExecutionStep{
 		{
 			TimeOffset:      0,
-			PlannedVUs:      uint64(et.ScaleInt64(varc.PreAllocatedVUs.Int64)),
-			MaxUnplannedVUs: uint64(et.ScaleInt64(varc.MaxVUs.Int64 - varc.PreAllocatedVUs.Int64)),
+			PlannedVUs:      uint64(et.ScaleInt64(varc.PreAllocatedVUs.Int64)),                                    //nolint:gosec
+			MaxUnplannedVUs: uint64(et.ScaleInt64(varc.MaxVUs.Int64) - et.ScaleInt64(varc.PreAllocatedVUs.Int64)), //nolint:gosec
 		},
 		{
 			TimeOffset:      sumStagesDuration(varc.Stages) + varc.GracefulStop.TimeDuration(),
@@ -161,7 +161,7 @@ type RampingArrivalRate struct {
 var _ lib.Executor = &RampingArrivalRate{}
 
 // Init values needed for the execution
-func (varr *RampingArrivalRate) Init(ctx context.Context) error {
+func (varr *RampingArrivalRate) Init(_ context.Context) error {
 	// err should always be nil, because Init() won't be called for executors
 	// with no work, as determined by their config's HasWork() method.
 	et, err := varr.BaseExecutor.executionState.ExecutionTuple.GetNewExecutionTupleFromValue(varr.config.MaxVUs.Int64)
@@ -301,7 +301,7 @@ func noNegativeSqrt(f float64) float64 {
 // This will allow us to implement https://github.com/k6io/k6/issues/1386
 // and things like all of the TODOs below in one place only.
 //
-//nolint:funlen,cyclop
+//nolint:funlen
 func (varr RampingArrivalRate) Run(parentCtx context.Context, out chan<- metrics.SampleContainer) (err error) {
 	segment := varr.executionState.ExecutionTuple.Segment
 	gracefulStop := varr.config.GetGracefulStop()

@@ -9,18 +9,19 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/spf13/afero"
+	"go.k6.io/k6/internal/lib/testutils"
+
 	"github.com/stretchr/testify/require"
 
 	"go.k6.io/k6/lib/fsext"
 )
 
-func dumpMemMapFsToBuf(fileSystem afero.Fs) (*bytes.Buffer, error) {
+func dumpMemMapFsToBuf(fileSystem fsext.Fs) (*bytes.Buffer, error) {
 	b := bytes.NewBuffer(nil)
 	w := tar.NewWriter(b)
-	err := fsext.Walk(fileSystem, afero.FilePathSeparator,
+	err := fsext.Walk(fileSystem, fsext.FilePathSeparator,
 		filepath.WalkFunc(func(filePath string, info fs.FileInfo, err error) error {
-			if filePath == afero.FilePathSeparator {
+			if filePath == fsext.FilePathSeparator {
 				return nil // skip the root
 			}
 			if err != nil {
@@ -34,7 +35,7 @@ func dumpMemMapFsToBuf(fileSystem afero.Fs) (*bytes.Buffer, error) {
 				})
 			}
 			var data []byte
-			data, err = afero.ReadFile(fileSystem, filePath)
+			data, err = fsext.ReadFile(fileSystem, filePath)
 			if err != nil {
 				return err
 			}
@@ -63,51 +64,41 @@ func TestOldArchive(t *testing.T) {
 	t.Parallel()
 	testCases := map[string]string{
 		// map of filename to data for each main file tested
-		"github.com/k6io/k6/samples/example.js": `github file`,
-		"cdnjs.com/packages/Faker":              `faker file`,
-		"C:/something/path2":                    `windows script`,
-		"/absolulte/path2":                      `unix script`,
+		"C:/something/path2": `windows script`,
+		"/absolulte/path2":   `unix script`,
 	}
 	for filename, data := range testCases {
 		filename, data := filename, data
 		t.Run(filename, func(t *testing.T) {
 			t.Parallel()
 			metadata := `{"filename": "` + filename + `", "options": {}}`
-			fs := makeMemMapFs(t, map[string][]byte{
+			fs := testutils.MakeMemMapFs(t, map[string][]byte{
 				// files
-				"/files/github.com/k6io/k6/samples/example.js": []byte(`github file`),
-				"/files/cdnjs.com/packages/Faker":              []byte(`faker file`),
-				"/files/example.com/path/to.js":                []byte(`example.com file`),
-				"/files/_/C/something/path":                    []byte(`windows file`),
-				"/files/_/absolulte/path":                      []byte(`unix file`),
+				"/files/example.com/path/to.js": []byte(`example.com file`),
+				"/files/_/C/something/path":     []byte(`windows file`),
+				"/files/_/absolulte/path":       []byte(`unix file`),
 
 				// scripts
-				"/scripts/github.com/k6io/k6/samples/example.js2": []byte(`github script`),
-				"/scripts/cdnjs.com/packages/Faker2":              []byte(`faker script`),
-				"/scripts/example.com/path/too.js":                []byte(`example.com script`),
-				"/scripts/_/C/something/path2":                    []byte(`windows script`),
-				"/scripts/_/absolulte/path2":                      []byte(`unix script`),
-				"/data":                                           []byte(data),
-				"/metadata.json":                                  []byte(metadata),
+				"/scripts/example.com/path/too.js": []byte(`example.com script`),
+				"/scripts/_/C/something/path2":     []byte(`windows script`),
+				"/scripts/_/absolulte/path2":       []byte(`unix script`),
+				"/data":                            []byte(data),
+				"/metadata.json":                   []byte(metadata),
 			})
 
 			buf, err := dumpMemMapFsToBuf(fs)
 			require.NoError(t, err)
 
-			expectedFilesystems := map[string]afero.Fs{
-				"file": makeMemMapFs(t, map[string][]byte{
+			expectedFilesystems := map[string]fsext.Fs{
+				"file": testutils.MakeMemMapFs(t, map[string][]byte{
 					"/C:/something/path":  []byte(`windows file`),
 					"/absolulte/path":     []byte(`unix file`),
 					"/C:/something/path2": []byte(`windows script`),
 					"/absolulte/path2":    []byte(`unix script`),
 				}),
-				"https": makeMemMapFs(t, map[string][]byte{
-					"/example.com/path/to.js":                 []byte(`example.com file`),
-					"/example.com/path/too.js":                []byte(`example.com script`),
-					"/github.com/k6io/k6/samples/example.js":  []byte(`github file`),
-					"/cdnjs.com/packages/Faker":               []byte(`faker file`),
-					"/github.com/k6io/k6/samples/example.js2": []byte(`github script`),
-					"/cdnjs.com/packages/Faker2":              []byte(`faker script`),
+				"https": testutils.MakeMemMapFs(t, map[string][]byte{
+					"/example.com/path/to.js":  []byte(`example.com file`),
+					"/example.com/path/too.js": []byte(`example.com script`),
 				}),
 			}
 
@@ -121,7 +112,7 @@ func TestOldArchive(t *testing.T) {
 
 func TestUnknownPrefix(t *testing.T) {
 	t.Parallel()
-	fs := makeMemMapFs(t, map[string][]byte{
+	fs := testutils.MakeMemMapFs(t, map[string][]byte{
 		"/strange/something": []byte(`github file`),
 	})
 	buf, err := dumpMemMapFsToBuf(fs)
@@ -147,22 +138,14 @@ func TestFilenamePwdResolve(t *testing.T) {
 			expectedPwdURL:      &url.URL{Scheme: "file", Path: "/home/nobody"},
 		},
 		{
-			Filename:            "github.com/k6io/k6/samples/http2.js",
-			Pwd:                 "github.com/k6io/k6/samples",
-			expectedFilenameURL: &url.URL{Opaque: "github.com/k6io/k6/samples/http2.js"},
-			expectedPwdURL:      &url.URL{Opaque: "github.com/k6io/k6/samples"},
+			Filename:      "github.com/k6io/k6/samples/http2.js",
+			Pwd:           "github.com/k6io/k6/samples",
+			expectedError: "are no longer supported",
 		},
 		{
-			Filename:            "cdnjs.com/libraries/Faker",
-			Pwd:                 "/home/nobody",
-			expectedFilenameURL: &url.URL{Opaque: "cdnjs.com/libraries/Faker"},
-			expectedPwdURL:      &url.URL{Scheme: "file", Path: "/home/nobody"},
-		},
-		{
-			Filename:            "example.com/something/dot.js",
-			Pwd:                 "example.com/something/",
-			expectedFilenameURL: &url.URL{Host: "example.com", Scheme: "", Path: "/something/dot.js"},
-			expectedPwdURL:      &url.URL{Host: "example.com", Scheme: "", Path: "/something"},
+			Filename:      "cdnjs.com/libraries/Faker",
+			Pwd:           "/home/nobody",
+			expectedError: "are no longer supported",
 		},
 		{
 			Filename:            "https://example.com/something/dot.js",
@@ -193,7 +176,7 @@ func TestFilenamePwdResolve(t *testing.T) {
 		"options": {}
 	}`
 
-		buf, err := dumpMemMapFsToBuf(makeMemMapFs(t, map[string][]byte{
+		buf, err := dumpMemMapFsToBuf(testutils.MakeMemMapFs(t, map[string][]byte{
 			"/metadata.json": []byte(metadata),
 		}))
 		require.NoError(t, err)
@@ -260,7 +243,7 @@ func TestDerivedExecutionDiscarding(t *testing.T) {
 	}
 
 	for _, test := range tests {
-		buf, err := dumpMemMapFsToBuf(makeMemMapFs(t, map[string][]byte{
+		buf, err := dumpMemMapFsToBuf(testutils.MakeMemMapFs(t, map[string][]byte{
 			"/metadata.json": []byte(test.metadata),
 		}))
 		require.NoError(t, err)

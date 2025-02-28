@@ -1,4 +1,4 @@
-// Copyright 2020-2022 Buf Technologies, Inc.
+// Copyright 2020-2024 Buf Technologies, Inc.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -18,7 +18,6 @@ import (
 	"google.golang.org/protobuf/types/descriptorpb"
 
 	"github.com/bufbuild/protocompile/ast"
-	"github.com/bufbuild/protocompile/reporter"
 )
 
 type hasOptionNode interface {
@@ -26,21 +25,34 @@ type hasOptionNode interface {
 	FileNode() ast.FileDeclNode // needed in order to query for NodeInfo
 }
 
-func FindOption(res hasOptionNode, handler *reporter.Handler, scope string, opts []*descriptorpb.UninterpretedOption, name string) (int, error) {
+type errorHandler func(span ast.SourceSpan, format string, args ...interface{}) error
+
+func FindFirstOption(res hasOptionNode, handler errorHandler, scope string, opts []*descriptorpb.UninterpretedOption, name string) (int, error) {
+	return findOption(res, handler, scope, opts, name, false, true)
+}
+
+func FindOption(res hasOptionNode, handler errorHandler, scope string, opts []*descriptorpb.UninterpretedOption, name string) (int, error) {
+	return findOption(res, handler, scope, opts, name, true, false)
+}
+
+func findOption(res hasOptionNode, handler errorHandler, scope string, opts []*descriptorpb.UninterpretedOption, name string, exact, first bool) (int, error) {
 	found := -1
 	for i, opt := range opts {
-		if len(opt.Name) != 1 {
+		if exact && len(opt.Name) != 1 {
 			continue
 		}
 		if opt.Name[0].GetIsExtension() || opt.Name[0].GetNamePart() != name {
 			continue
+		}
+		if first {
+			return i, nil
 		}
 		if found >= 0 {
 			optNode := res.OptionNode(opt)
 			fn := res.FileNode()
 			node := optNode.GetName()
 			nodeInfo := fn.NodeInfo(node)
-			return -1, handler.HandleErrorf(nodeInfo.Start(), "%s: option %s cannot be defined more than once", scope, name)
+			return -1, handler(nodeInfo, "%s: option %s cannot be defined more than once", scope, name)
 		}
 		found = i
 	}

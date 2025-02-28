@@ -1,4 +1,4 @@
-// Copyright 2020-2022 Buf Technologies, Inc.
+// Copyright 2020-2024 Buf Technologies, Inc.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -25,7 +25,8 @@ import (
 	"github.com/bufbuild/protocompile/reporter"
 )
 
-//go:generate goyacc -o proto.y.go -l -p proto proto.y
+// The path ../.tmp/bin/goyacc is built when using `make generate` from repo root.
+//go:generate ../.tmp/bin/goyacc -o proto.y.go -l -p proto proto.y
 
 func init() {
 	protoErrorVerbose = true
@@ -77,6 +78,19 @@ func setTokenName(token int, text string) {
 // supplies the source code. The given handler is used to report errors and
 // warnings encountered while parsing. If any errors are reported, this function
 // returns a non-nil error.
+//
+// If the error returned is due to a syntax error in the source, then a non-nil
+// AST is also returned. If the handler chooses to not abort the parse (e.g. the
+// underlying error reporter returns nil instead of an error), the parser will
+// attempt to recover and keep going. This allows multiple syntax errors to be
+// reported in a single pass. And it also means that more of the AST can be
+// populated (erroneous productions around the syntax error will of course be
+// absent).
+//
+// The degree to which the parser can recover from errors and populate the AST
+// depends on the nature of the syntax error and if there are any tokens after the
+// syntax error that can help the parser recover. This error recovery and partial
+// AST production is best effort.
 func Parse(filename string, r io.Reader, handler *reporter.Handler) (*ast.FileNode, error) {
 	lx, err := newLexer(r, filename, handler)
 	if err != nil {
@@ -137,16 +151,23 @@ type Result interface {
 	// FileDescriptorProto hierarchy. If this result has no AST, this returns a
 	// placeholder node.
 	FieldNode(*descriptorpb.FieldDescriptorProto) ast.FieldDeclNode
-	// OneOfNode returns the AST node corresponding to the given oneof. This can
+	// OneofNode returns the AST node corresponding to the given oneof. This can
 	// return nil, such as if the given oneof is not part of the
 	// FileDescriptorProto hierarchy. If this result has no AST, this returns a
 	// placeholder node.
-	OneOfNode(*descriptorpb.OneofDescriptorProto) ast.Node
+	OneofNode(*descriptorpb.OneofDescriptorProto) ast.OneofDeclNode
 	// ExtensionRangeNode returns the AST node corresponding to the given
 	// extension range. This can return nil, such as if the given range is not
 	// part of the FileDescriptorProto hierarchy. If this result has no AST,
 	// this returns a placeholder node.
 	ExtensionRangeNode(*descriptorpb.DescriptorProto_ExtensionRange) ast.RangeDeclNode
+
+	// ExtensionsNode returns the AST node corresponding to the "extensions"
+	// statement in a message that corresponds to the given range. This will be
+	// the parent of the node returned by ExtensionRangeNode, which contains the
+	// options that apply to all child ranges.
+	ExtensionsNode(*descriptorpb.DescriptorProto_ExtensionRange) ast.NodeWithOptions
+
 	// MessageReservedRangeNode returns the AST node corresponding to the given
 	// reserved range. This can return nil, such as if the given range is not
 	// part of the FileDescriptorProto hierarchy. If this result has no AST,
@@ -156,7 +177,7 @@ type Result interface {
 	// return nil, such as if the given enum is not part of the
 	// FileDescriptorProto hierarchy. If this result has no AST, this returns a
 	// placeholder node.
-	EnumNode(*descriptorpb.EnumDescriptorProto) ast.Node
+	EnumNode(*descriptorpb.EnumDescriptorProto) ast.NodeWithOptions
 	// EnumValueNode returns the AST node corresponding to the given enum. This
 	// can return nil, such as if the given enum value is not part of the
 	// FileDescriptorProto hierarchy. If this result has no AST, this returns a
@@ -171,7 +192,7 @@ type Result interface {
 	// can return nil, such as if the given service is not part of the
 	// FileDescriptorProto hierarchy. If this result has no AST, this returns a
 	// placeholder node.
-	ServiceNode(*descriptorpb.ServiceDescriptorProto) ast.Node
+	ServiceNode(*descriptorpb.ServiceDescriptorProto) ast.NodeWithOptions
 	// MethodNode returns the AST node corresponding to the given method. This
 	// can return nil, such as if the given method is not part of the
 	// FileDescriptorProto hierarchy. If this result has no AST, this returns a

@@ -9,12 +9,13 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"go.k6.io/k6/js"
+	"go.k6.io/k6/internal/js"
+	"go.k6.io/k6/internal/lib/testutils"
+	"go.k6.io/k6/internal/lib/testutils/httpmultibin"
+	"go.k6.io/k6/internal/loader"
+	"go.k6.io/k6/internal/usage"
 	"go.k6.io/k6/lib"
-	"go.k6.io/k6/lib/testutils"
-	"go.k6.io/k6/lib/testutils/httpmultibin"
 	"go.k6.io/k6/lib/types"
-	"go.k6.io/k6/loader"
 	"go.k6.io/k6/metrics"
 )
 
@@ -103,6 +104,7 @@ func TestSetupDataMarshalling(t *testing.T) {
 			Logger:         testutils.NewLogger(t),
 			BuiltinMetrics: builtinMetrics,
 			Registry:       registry,
+			Usage:          usage.New(),
 		},
 
 		&loader.SourceData{URL: &url.URL{Path: "/script.js"}, Data: script},

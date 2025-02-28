@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"math/rand"
 	"net"
 	"net/http"
@@ -123,7 +122,7 @@ func TestTracer(t *testing.T) { //nolint:tparallel
 			res, err := transport.RoundTrip(req.WithContext(httptrace.WithClientTrace(context.Background(), ct)))
 			require.NoError(t, err)
 
-			_, err = io.Copy(ioutil.Discard, res.Body)
+			_, err = io.Copy(io.Discard, res.Body)
 			assert.NoError(t, err)
 			assert.NoError(t, res.Body.Close())
 			if runtime.GOOS == "windows" {
@@ -177,13 +176,12 @@ func TestTracer(t *testing.T) { //nolint:tparallel
 
 type failingConn struct {
 	net.Conn
+	failOnConnWrite bool
 }
 
-var failOnConnWrite = false
-
-func (c failingConn) Write(b []byte) (int, error) {
-	if failOnConnWrite {
-		failOnConnWrite = false
+func (c *failingConn) Write(b []byte) (int, error) {
+	if c.failOnConnWrite {
+		c.failOnConnWrite = false
 		return 0, errors.New("write error")
 	}
 
@@ -199,9 +197,11 @@ func TestTracerNegativeHttpSendingValues(t *testing.T) {
 	assert.True(t, ok)
 
 	dialer := &net.Dialer{}
+	var connection *failingConn
 	transport.DialContext = func(ctx context.Context, proto, addr string) (net.Conn, error) {
 		conn, err := dialer.DialContext(ctx, proto, addr)
-		return failingConn{conn}, err
+		connection = &failingConn{conn, false}
+		return connection, err
 	}
 
 	req, err := http.NewRequest(http.MethodGet, srv.URL+"/get", nil)
@@ -211,20 +211,20 @@ func TestTracerNegativeHttpSendingValues(t *testing.T) {
 		tracer := &Tracer{}
 		res, err := transport.RoundTrip(req.WithContext(httptrace.WithClientTrace(context.Background(), tracer.Trace())))
 		require.NoError(t, err)
-		_, err = io.Copy(ioutil.Discard, res.Body)
+		_, err = io.Copy(io.Discard, res.Body)
 		assert.NoError(t, err)
 		assert.NoError(t, res.Body.Close())
 		tracer.Done()
 	}
 
 	// make the next connection write fail
-	failOnConnWrite = true
+	connection.failOnConnWrite = true
 
 	{
 		tracer := &Tracer{}
 		res, err := transport.RoundTrip(req.WithContext(httptrace.WithClientTrace(context.Background(), tracer.Trace())))
 		require.NoError(t, err)
-		_, err = io.Copy(ioutil.Discard, res.Body)
+		_, err = io.Copy(io.Discard, res.Body)
 		assert.NoError(t, err)
 		assert.NoError(t, res.Body.Close())
 		trail := tracer.Done()
@@ -245,7 +245,7 @@ func TestTracerError(t *testing.T) {
 	req, err := http.NewRequest(http.MethodGet, srv.URL+"/get", nil)
 	require.NoError(t, err)
 
-	_, err = http.DefaultTransport.RoundTrip(
+	_, err = http.DefaultTransport.RoundTrip( //nolint:bodyclose
 		req.WithContext(
 			httptrace.WithClientTrace(
 				context.Background(),

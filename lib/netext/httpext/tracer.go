@@ -40,7 +40,7 @@ type Trail struct {
 	Samples  []metrics.Sample
 }
 
-// SaveSamples populates the Trail's sample slice so they're accesible via GetSamples()
+// SaveSamples populates the Trail's sample slice so they're accessible via GetSamples()
 func (tr *Trail) SaveSamples(builtinMetrics *metrics.BuiltinMetrics, ctm *metrics.TagsAndMeta) {
 	tr.Tags = ctm.Tags
 	tr.Metadata = ctm.Metadata
@@ -184,17 +184,17 @@ func now() int64 {
 // Keep in mind that GetConn won't be called if a connection
 // is reused though, for example when there's a redirect.
 // If it's called, it will be called before all other hooks.
-func (t *Tracer) GetConn(hostPort string) {
+func (t *Tracer) GetConn(_ string) {
 	t.getConn = now()
 }
 
 // ConnectStart is called when a new connection's Dial begins.
 // If net.Dialer.DualStack (IPv6 "Happy Eyeballs") support is
-// enabled, this may be called multiple times.
+// enabled (default), this may be called multiple times.
 //
 // If the connection is reused, this won't be called. Otherwise,
 // it will be called after GetConn() and before ConnectDone().
-func (t *Tracer) ConnectStart(network, addr string) {
+func (t *Tracer) ConnectStart(_, _ string) {
 	// If using dual-stack dialing, it's possible to get this
 	// multiple times, so the atomic compareAndSwap ensures
 	// that only the first call's time is recorded
@@ -203,14 +203,14 @@ func (t *Tracer) ConnectStart(network, addr string) {
 
 // ConnectDone is called when a new connection's Dial
 // completes. The provided err indicates whether the
-// connection completedly successfully.
+// connection completed successfully.
 // If net.Dialer.DualStack ("Happy Eyeballs") support is
-// enabled, this may be called multiple times.
+// enabled (default), this may be called multiple times.
 //
 // If the connection is reused, this won't be called. Otherwise,
 // it will be called after ConnectStart() and before either
 // TLSHandshakeStart() (for TLS connections) or GotConn().
-func (t *Tracer) ConnectDone(network, addr string, err error) {
+func (t *Tracer) ConnectDone(_, _ string, err error) {
 	// If using dual-stack dialing, it's possible to get this
 	// multiple times, so the atomic compareAndSwap ensures
 	// that only the first call's time is recorded
@@ -239,7 +239,7 @@ func (t *Tracer) TLSHandshakeStart() {
 // it will be called after TLSHandshakeStart() and before GotConn().
 // If the request was cancelled, this could be called after the
 // RoundTrip() method has returned.
-func (t *Tracer) TLSHandshakeDone(state tls.ConnectionState, err error) {
+func (t *Tracer) TLSHandshakeDone(_ tls.ConnectionState, err error) {
 	if err == nil {
 		atomic.CompareAndSwapInt64(&t.tlsHandshakeDone, 0, now())
 	}
@@ -344,14 +344,15 @@ func (t *Tracer) Done() *Trail {
 		trail.TLSHandshaking = time.Duration(tlsHandshakeDone - tlsHandshakeStart)
 	}
 	if wroteRequest != 0 {
-		if tlsHandshakeDone != 0 {
+		switch {
+		case tlsHandshakeDone != 0:
 			// If the request was sent over TLS, we need to use
 			// TLS Handshake Done time to calculate sending duration
 			trail.Sending = time.Duration(wroteRequest - tlsHandshakeDone)
-		} else if connectDone != 0 {
+		case connectDone != 0:
 			// Otherwise, use the end of the normal connection
 			trail.Sending = time.Duration(wroteRequest - connectDone)
-		} else {
+		default:
 			// Finally, this handles the strange HTTP/2 case where the GotConn() hook
 			// gets called first, but with Reused=false
 			trail.Sending = time.Duration(wroteRequest - gotConn)

@@ -1,3 +1,4 @@
+// Package httpext provides extensions to the standard net/http package
 package httpext
 
 import (
@@ -71,8 +72,6 @@ func newTransport(
 
 // Helper method to finish the tracer trail, assemble the tag values and emits
 // the metric samples for the supplied unfinished request.
-//
-//nolint:nestif,funlen
 func (t *transport) measureAndEmitMetrics(unfReq *unfinishedRequest) *finishedRequest {
 	trail := unfReq.tracer.Done()
 
@@ -111,7 +110,7 @@ func (t *transport) measureAndEmitMetrics(unfReq *unfinishedRequest) *finishedRe
 	} else {
 		tagsAndMeta.SetSystemTagOrMetaIfEnabled(enabledTags, metrics.TagStatus, strconv.Itoa(unfReq.response.StatusCode))
 		if unfReq.response.StatusCode >= 400 {
-			result.errorCode = errCode(1000 + unfReq.response.StatusCode)
+			result.errorCode = errCode(1000 + unfReq.response.StatusCode) //nolint:gosec
 			tagsAndMeta.SetSystemTagOrMetaIfEnabled(enabledTags, metrics.TagErrorCode, strconv.Itoa(int(result.errorCode)))
 		}
 		tagsAndMeta.SetSystemTagOrMetaIfEnabled(enabledTags, metrics.TagProto, unfReq.response.Proto)

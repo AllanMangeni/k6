@@ -4,19 +4,17 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sirupsen/logrus"
-
 	"gopkg.in/guregu/null.v3"
 
-	"github.com/sirupsen/logrus/hooks/test"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"go.k6.io/k6/lib/testutils"
 	"go.k6.io/k6/lib/types"
 )
 
 func TestNewConfig(t *testing.T) {
+	t.Parallel()
+
 	config := NewConfig()
 	assert.Equal(t, "file.csv", config.FileName.String)
 	assert.Equal(t, "1s", config.SaveInterval.String())
@@ -24,6 +22,8 @@ func TestNewConfig(t *testing.T) {
 }
 
 func TestApply(t *testing.T) {
+	t.Parallel()
+
 	configs := []Config{
 		{
 			FileName:     null.StringFrom(""),
@@ -56,7 +56,10 @@ func TestApply(t *testing.T) {
 	for i := range configs {
 		config := configs[i]
 		expected := expected[i]
+
 		t.Run(expected.FileName+"_"+expected.SaveInterval, func(t *testing.T) {
+			t.Parallel()
+
 			baseConfig := NewConfig()
 			baseConfig = baseConfig.Apply(config)
 
@@ -68,6 +71,8 @@ func TestApply(t *testing.T) {
 }
 
 func TestParseArg(t *testing.T) {
+	t.Parallel()
+
 	cases := map[string]struct {
 		config             Config
 		expectedLogEntries []string
@@ -80,16 +85,6 @@ func TestParseArg(t *testing.T) {
 				TimeFormat:   null.NewString("unix", false),
 			},
 		},
-		"save_interval=5s": {
-			config: Config{
-				FileName:     null.NewString("file.csv", false),
-				SaveInterval: types.NullDurationFrom(5 * time.Second),
-				TimeFormat:   null.NewString("unix", false),
-			},
-			expectedLogEntries: []string{
-				"CSV output argument 'save_interval' is deprecated, please use 'saveInterval' instead.",
-			},
-		},
 		"saveInterval=5s": {
 			config: Config{
 				FileName:     null.NewString("file.csv", false),
@@ -97,28 +92,7 @@ func TestParseArg(t *testing.T) {
 				TimeFormat:   null.NewString("unix", false),
 			},
 		},
-		"file_name=test.csv,save_interval=5s": {
-			config: Config{
-				FileName:     null.StringFrom("test.csv"),
-				SaveInterval: types.NullDurationFrom(5 * time.Second),
-				TimeFormat:   null.NewString("unix", false),
-			},
-			expectedLogEntries: []string{
-				"CSV output argument 'file_name' is deprecated, please use 'fileName' instead.",
-				"CSV output argument 'save_interval' is deprecated, please use 'saveInterval' instead.",
-			},
-		},
-		"fileName=test.csv,save_interval=5s": {
-			config: Config{
-				FileName:     null.StringFrom("test.csv"),
-				SaveInterval: types.NullDurationFrom(5 * time.Second),
-				TimeFormat:   null.NewString("unix", false),
-			},
-			expectedLogEntries: []string{
-				"CSV output argument 'save_interval' is deprecated, please use 'saveInterval' instead.",
-			},
-		},
-		"filename=test.csv,save_interval=5s": {
+		"filename=test.csv,saveInterval=5s": {
 			expectedErr: true,
 		},
 		"fileName=test.csv,timeFormat=rfc3339": {
@@ -134,11 +108,10 @@ func TestParseArg(t *testing.T) {
 		arg := arg
 		testCase := testCase
 
-		testLogger, hook := test.NewNullLogger()
-		testLogger.SetOutput(testutils.NewTestOutput(t))
-
 		t.Run(arg, func(t *testing.T) {
-			config, err := ParseArg(arg, testLogger)
+			t.Parallel()
+
+			config, err := ParseArg(arg)
 
 			if testCase.expectedErr {
 				assert.Error(t, err)
@@ -147,13 +120,6 @@ func TestParseArg(t *testing.T) {
 
 			require.NoError(t, err)
 			assert.Equal(t, testCase.config, config)
-
-			var entries []string
-			for _, v := range hook.AllEntries() {
-				assert.Equal(t, v.Level, logrus.WarnLevel)
-				entries = append(entries, v.Message)
-			}
-			assert.ElementsMatch(t, entries, testCase.expectedLogEntries)
 		})
 	}
 }

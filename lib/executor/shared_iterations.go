@@ -10,10 +10,10 @@ import (
 	"github.com/sirupsen/logrus"
 	"gopkg.in/guregu/null.v3"
 
+	"go.k6.io/k6/internal/ui/pb"
 	"go.k6.io/k6/lib"
 	"go.k6.io/k6/lib/types"
 	"go.k6.io/k6/metrics"
-	"go.k6.io/k6/ui/pb"
 )
 
 const sharedIterationsType = "shared-iterations"
@@ -114,7 +114,7 @@ func (sic SharedIterationsConfig) GetExecutionRequirements(et *lib.ExecutionTupl
 	return []lib.ExecutionStep{
 		{
 			TimeOffset: 0,
-			PlannedVUs: uint64(vus),
+			PlannedVUs: uint64(vus), //nolint:gosec
 		},
 		{
 			TimeOffset: sic.MaxDuration.TimeDuration() + sic.GracefulStop.TimeDuration(),
@@ -150,7 +150,7 @@ func (sic SharedIterationsConfig) HasWork(et *lib.ExecutionTuple) bool {
 }
 
 // Init values needed for the execution
-func (si *SharedIterations) Init(ctx context.Context) error {
+func (si *SharedIterations) Init(_ context.Context) error {
 	// err should always be nil, because Init() won't be called for executors
 	// with no work, as determined by their config's HasWork() method.
 	et, err := si.BaseExecutor.executionState.ExecutionTuple.GetNewExecutionTupleFromValue(si.config.VUs.Int64)
@@ -182,10 +182,10 @@ func (si SharedIterations) Run(parentCtx context.Context, out chan<- metrics.Sam
 		"vus": numVUs, "iterations": iterations, "maxDuration": duration, "type": si.config.GetType(),
 	}).Debug("Starting executor run...")
 
-	totalIters := uint64(iterations)
+	totalIters := uint64(iterations) //nolint:gosec
 	doneIters := new(uint64)
 	vusFmt := pb.GetFixedLengthIntFormat(numVUs)
-	itersFmt := pb.GetFixedLengthIntFormat(int64(totalIters))
+	itersFmt := pb.GetFixedLengthIntFormat(iterations)
 	progressFn := func() (float64, []string) {
 		spent := time.Since(startTime)
 		progVUs := fmt.Sprintf(vusFmt+" VUs", numVUs)

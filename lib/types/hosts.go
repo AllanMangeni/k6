@@ -97,7 +97,7 @@ type Hosts struct {
 // NewHosts returns new Hosts from given addresses.
 func NewHosts(source map[string]Host) (*Hosts, error) {
 	h := &Hosts{
-		source: source,
+		source: toLowerKeys(source),
 		n: &trieNode{
 			children: make(map[rune]*trieNode),
 		},
@@ -113,12 +113,20 @@ func NewHosts(source map[string]Host) (*Hosts, error) {
 	return h, nil
 }
 
+func toLowerKeys(source map[string]Host) map[string]Host {
+	result := make(map[string]Host, len(source))
+	for k, v := range source {
+		result[strings.ToLower(k)] = v
+	}
+	return result
+}
+
 // Regex description of domain(:port)? pattern to enforce blocks by.
 // Global var to avoid compilation penalty at runtime.
 // Based on regex from https://stackoverflow.com/a/106223/5427244
 //
 //nolint:lll
-var validHostPattern *regexp.Regexp = regexp.MustCompile(`^(\*\.?)?((([a-zA-Z0-9]|[a-zA-Z0-9][a-zA-Z0-9\-]*[a-zA-Z0-9])\.)*([A-Za-z0-9]|[A-Za-z0-9][A-Za-z0-9\-]*[A-Za-z0-9]))?(:[0-9]{1,5})?$`)
+var validHostPattern = regexp.MustCompile(`^(\*\.?)?((([a-zA-Z0-9]|[a-zA-Z0-9][a-zA-Z0-9\-]*[a-zA-Z0-9])\.)*([A-Za-z0-9]|[A-Za-z0-9][A-Za-z0-9\-]*[A-Za-z0-9]))?(:[0-9]{1,5})?$`)
 
 func isValidHostPattern(s string) error {
 	if len(validHostPattern.FindString(s)) != len(s) {

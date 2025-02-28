@@ -15,13 +15,14 @@ import (
 	"github.com/stretchr/testify/require"
 	"gopkg.in/guregu/null.v3"
 
-	"go.k6.io/k6/execution"
-	"go.k6.io/k6/js"
+	"go.k6.io/k6/internal/execution"
+	"go.k6.io/k6/internal/execution/local"
+	"go.k6.io/k6/internal/js"
+	"go.k6.io/k6/internal/loader"
+	"go.k6.io/k6/internal/metrics/engine"
 	"go.k6.io/k6/lib"
 	"go.k6.io/k6/lib/types"
-	"go.k6.io/k6/loader"
 	"go.k6.io/k6/metrics"
-	"go.k6.io/k6/metrics/engine"
 	"go.k6.io/k6/output"
 )
 
@@ -138,9 +139,9 @@ func TestSetupData(t *testing.T) {
 				TeardownTimeout: types.NullDurationFrom(5 * time.Second),
 			}, runner)
 
-			execScheduler, err := execution.NewScheduler(testState)
+			execScheduler, err := execution.NewScheduler(testState, local.NewController())
 			require.NoError(t, err)
-			metricsEngine, err := engine.NewMetricsEngine(testState)
+			metricsEngine, err := engine.NewMetricsEngine(testState.Registry, testState.Logger)
 			require.NoError(t, err)
 
 			globalCtx, globalCancel := context.WithCancel(context.Background())
@@ -171,6 +172,9 @@ func TestSetupData(t *testing.T) {
 				rw := httptest.NewRecorder()
 				handler.ServeHTTP(rw, httptest.NewRequest(method, "/v1/setup", bytes.NewBufferString(body)))
 				res := rw.Result()
+				t.Cleanup(func() {
+					assert.NoError(t, res.Body.Close())
+				})
 				if !assert.Equal(t, http.StatusOK, res.StatusCode) {
 					t.Logf("body: %s\n", rw.Body.String())
 					return

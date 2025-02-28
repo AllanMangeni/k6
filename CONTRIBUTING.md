@@ -20,7 +20,7 @@ That said, "how do I..."-type questions are often more suited for community foru
 
 ## Contributing code
 
-If you'd like to contribute code to k6, this is the basic procedure. Make sure to follow the [style guide](#style-guide) described below.
+If you'd like to contribute code to k6, this is the basic procedure. Make sure to follow the [style guide](#code-style) described below.
 
 1. Find an issue you'd like to fix. If there is none already, or you'd like to add a feature, please open one, and we can talk about how to do it.  Out of respect for your time, please start a discussion regarding any bigger contributions either in a GitHub Issue, in the community forums **before** you get started on the implementation.
   
@@ -47,16 +47,10 @@ For alternative ways of cloning the k6 repository, please refer to [GitHub's clo
 
 #### Running the linter
 
-We make use of the [golangci-lint](https://github.com/golangci/golangci-lint) tool to lint the code in CI. The actual version you can find in our [`.golangci.yml`](https://github.com/grafana/k6/blob/master/.golangci.yml#L1). To run it locally, first [install it](https://golangci-lint.run/usage/install/#local-installation), then run:
+We make use of the [golangci-lint](https://github.com/golangci/golangci-lint) tool to lint the code in CI. The actual version you can find in our [`.golangci.yml`](https://github.com/grafana/k6/blob/master/.golangci.yml#L1). To run it locally, first [install it](https://golangci-lint.run/welcome/install/#local-installation), then run:
 
 ```bash
 make lint
-```
-
-You can also run the linter inside the docker container, which will benefit from the version of the linter being the same as it will be in CI.
-
-```bash
-make ci-like-lint
 ```
 
 #### Running the test suite

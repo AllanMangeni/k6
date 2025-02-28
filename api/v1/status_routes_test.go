@@ -15,11 +15,12 @@ import (
 	"github.com/stretchr/testify/require"
 	"gopkg.in/guregu/null.v3"
 
-	"go.k6.io/k6/execution"
+	"go.k6.io/k6/internal/execution"
+	"go.k6.io/k6/internal/execution/local"
+	"go.k6.io/k6/internal/lib/testutils/minirunner"
+	"go.k6.io/k6/internal/metrics/engine"
 	"go.k6.io/k6/lib"
-	"go.k6.io/k6/lib/testutils/minirunner"
 	"go.k6.io/k6/metrics"
-	"go.k6.io/k6/metrics/engine"
 	"go.k6.io/k6/output"
 )
 
@@ -32,6 +33,9 @@ func TestGetStatus(t *testing.T) {
 	rw := httptest.NewRecorder()
 	NewHandler(cs).ServeHTTP(rw, httptest.NewRequest(http.MethodGet, "/v1/status", nil))
 	res := rw.Result()
+	t.Cleanup(func() {
+		assert.NoError(t, res.Body.Close())
+	})
 	assert.Equal(t, http.StatusOK, res.StatusCode)
 
 	t.Run("document", func(t *testing.T) {
@@ -112,10 +116,10 @@ func TestPatchStatus(t *testing.T) {
 			require.NoError(t, err)
 
 			testState := getTestRunState(t, lib.Options{Scenarios: scenarios}, &minirunner.MiniRunner{})
-			execScheduler, err := execution.NewScheduler(testState)
+			execScheduler, err := execution.NewScheduler(testState, local.NewController())
 			require.NoError(t, err)
 
-			metricsEngine, err := engine.NewMetricsEngine(testState)
+			metricsEngine, err := engine.NewMetricsEngine(testState.Registry, testState.Logger)
 			require.NoError(t, err)
 
 			globalCtx, globalCancel := context.WithCancel(context.Background())
@@ -160,6 +164,9 @@ func TestPatchStatus(t *testing.T) {
 			rw := httptest.NewRecorder()
 			NewHandler(cs).ServeHTTP(rw, httptest.NewRequest(http.MethodPatch, "/v1/status", bytes.NewReader(testCase.Payload)))
 			res := rw.Result()
+			t.Cleanup(func() {
+				assert.NoError(t, res.Body.Close())
+			})
 
 			require.Equal(t, "application/json; charset=utf-8", rw.Header().Get("Content-Type"))
 

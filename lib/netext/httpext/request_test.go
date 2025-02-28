@@ -5,7 +5,6 @@ import (
 	"context"
 	"errors"
 	"io"
-	"io/ioutil"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -67,7 +66,7 @@ func TestCompressionBodyError(t *testing.T) {
 	algos := []CompressionType{CompressionTypeGzip}
 	t.Run("bad read body", func(t *testing.T) {
 		t.Parallel()
-		_, _, err := compressBody(algos, ioutil.NopCloser(badReadBody()))
+		_, _, err := compressBody(algos, io.NopCloser(badReadBody()))
 		require.Error(t, err)
 		require.Equal(t, err.Error(), badReadMsg)
 	})
@@ -109,7 +108,7 @@ func TestMakeRequestError(t *testing.T) {
 
 	t.Run("invalid upgrade response", func(t *testing.T) {
 		t.Parallel()
-		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 			w.Header().Add("Connection", "Upgrade")
 			w.Header().Add("Upgrade", "h2c")
 			w.WriteHeader(http.StatusSwitchingProtocols)
@@ -162,7 +161,7 @@ func TestResponseStatus(t *testing.T) {
 			tc := tc
 			t.Run(tc.name, func(t *testing.T) {
 				t.Parallel()
-				server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 					w.WriteHeader(tc.statusCode)
 				}))
 				defer server.Close()
@@ -233,7 +232,7 @@ func TestURL(t *testing.T) {
 
 func TestMakeRequestTimeoutInTheMiddle(t *testing.T) {
 	t.Parallel()
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Add("Content-Length", "100000")
 		w.WriteHeader(http.StatusOK)
 		if f, ok := w.(http.Flusher); ok {
@@ -352,7 +351,10 @@ func TestTrailFailed(t *testing.T) {
 			require.NotNil(t, res)
 			require.Len(t, samples, 1)
 			sample := <-samples
-			trail := sample.(*Trail)
+
+			trail, ok := sample.(*Trail)
+			require.True(t, ok)
+
 			require.Equal(t, failed, trail.Failed)
 
 			var httpReqFailedSampleValue null.Bool
@@ -438,7 +440,7 @@ func TestMakeRequestDialTimeout(t *testing.T) {
 
 func TestMakeRequestTimeoutInTheBegining(t *testing.T) {
 	t.Parallel()
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) {
 		time.Sleep(100 * time.Millisecond)
 	}))
 	defer srv.Close()
@@ -494,7 +496,7 @@ func TestMakeRequestTimeoutInTheBegining(t *testing.T) {
 func TestMakeRequestRPSLimit(t *testing.T) {
 	t.Parallel()
 	var requests int64
-	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	ts := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) {
 		atomic.AddInt64(&requests, 1)
 	}))
 	defer ts.Close()

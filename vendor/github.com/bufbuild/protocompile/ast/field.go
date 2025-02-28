@@ -1,4 +1,4 @@
-// Copyright 2020-2022 Buf Technologies, Inc.
+// Copyright 2020-2024 Buf Technologies, Inc.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -27,7 +27,7 @@ import "fmt"
 // This also allows NoSourceNode and SyntheticMapField to be used in place of
 // one of the above for some usages.
 type FieldDeclNode interface {
-	Node
+	NodeWithOptions
 	FieldLabel() Node
 	FieldName() Node
 	FieldType() Node
@@ -41,7 +41,7 @@ var _ FieldDeclNode = (*FieldNode)(nil)
 var _ FieldDeclNode = (*GroupNode)(nil)
 var _ FieldDeclNode = (*MapFieldNode)(nil)
 var _ FieldDeclNode = (*SyntheticMapField)(nil)
-var _ FieldDeclNode = NoSourceNode{}
+var _ FieldDeclNode = (*NoSourceNode)(nil)
 
 // FieldNode represents a normal field declaration (not groups or maps). It
 // can represent extension fields as well as non-extension fields (both inside
@@ -64,7 +64,7 @@ type FieldNode struct {
 }
 
 func (*FieldNode) msgElement()    {}
-func (*FieldNode) oneOfElement()  {}
+func (*FieldNode) oneofElement()  {}
 func (*FieldNode) extendElement() {}
 
 // NewFieldNode creates a new *FieldNode. The label and options arguments may be
@@ -84,16 +84,16 @@ func NewFieldNode(label *KeywordNode, fieldType IdentValueNode, name *IdentNode,
 	if name == nil {
 		panic("name is nil")
 	}
-	if equals == nil {
-		panic("equals is nil")
+	numChildren := 2
+	if equals != nil {
+		numChildren++
 	}
-	if tag == nil {
-		panic("tag is nil")
+	if tag != nil {
+		numChildren++
 	}
-	if semicolon == nil {
-		panic("semicolon is nil")
+	if semicolon != nil {
+		numChildren++
 	}
-	numChildren := 5
 	if label != nil {
 		numChildren++
 	}
@@ -104,11 +104,19 @@ func NewFieldNode(label *KeywordNode, fieldType IdentValueNode, name *IdentNode,
 	if label != nil {
 		children = append(children, label)
 	}
-	children = append(children, fieldType, name, equals, tag)
+	children = append(children, fieldType, name)
+	if equals != nil {
+		children = append(children, equals)
+	}
+	if tag != nil {
+		children = append(children, tag)
+	}
 	if opts != nil {
 		children = append(children, opts)
 	}
-	children = append(children, semicolon)
+	if semicolon != nil {
+		children = append(children, semicolon)
+	}
 
 	return &FieldNode{
 		compositeNode: compositeNode{
@@ -143,6 +151,9 @@ func (n *FieldNode) FieldType() Node {
 }
 
 func (n *FieldNode) FieldTag() Node {
+	if n.Tag == nil {
+		return n
+	}
 	return n.Tag
 }
 
@@ -159,6 +170,14 @@ func (n *FieldNode) GetGroupKeyword() Node {
 
 func (n *FieldNode) GetOptions() *CompactOptionsNode {
 	return n.Options
+}
+
+func (n *FieldNode) RangeOptions(fn func(*OptionNode) bool) {
+	for _, opt := range n.Options.Options {
+		if !fn(opt) {
+			return
+		}
+	}
 }
 
 // FieldLabel represents the label of a field, which indicates its cardinality
@@ -213,7 +232,7 @@ type GroupNode struct {
 }
 
 func (*GroupNode) msgElement()    {}
-func (*GroupNode) oneOfElement()  {}
+func (*GroupNode) oneofElement()  {}
 func (*GroupNode) extendElement() {}
 
 // NewGroupNode creates a new *GroupNode. The label and options arguments may be
@@ -235,20 +254,20 @@ func NewGroupNode(label *KeywordNode, keyword *KeywordNode, name *IdentNode, equ
 	if name == nil {
 		panic("name is nil")
 	}
-	if equals == nil {
-		panic("equals is nil")
-	}
-	if tag == nil {
-		panic("tag is nil")
-	}
 	if openBrace == nil {
 		panic("openBrace is nil")
 	}
 	if closeBrace == nil {
 		panic("closeBrace is nil")
 	}
-	numChildren := 6 + len(decls)
+	numChildren := 4 + len(decls)
 	if label != nil {
+		numChildren++
+	}
+	if equals != nil {
+		numChildren++
+	}
+	if tag != nil {
 		numChildren++
 	}
 	if opts != nil {
@@ -258,7 +277,13 @@ func NewGroupNode(label *KeywordNode, keyword *KeywordNode, name *IdentNode, equ
 	if label != nil {
 		children = append(children, label)
 	}
-	children = append(children, keyword, name, equals, tag)
+	children = append(children, keyword, name)
+	if equals != nil {
+		children = append(children, equals)
+	}
+	if tag != nil {
+		children = append(children, tag)
+	}
 	if opts != nil {
 		children = append(children, opts)
 	}
@@ -300,6 +325,9 @@ func (n *GroupNode) FieldType() Node {
 }
 
 func (n *GroupNode) FieldTag() Node {
+	if n.Tag == nil {
+		return n
+	}
 	return n.Tag
 }
 
@@ -318,23 +346,57 @@ func (n *GroupNode) GetOptions() *CompactOptionsNode {
 	return n.Options
 }
 
-func (n *GroupNode) MessageName() Node {
+func (n *GroupNode) RangeOptions(fn func(*OptionNode) bool) {
+	for _, opt := range n.Options.Options {
+		if !fn(opt) {
+			return
+		}
+	}
+}
+
+func (n *GroupNode) AsMessage() *SyntheticGroupMessageNode {
+	return (*SyntheticGroupMessageNode)(n)
+}
+
+// SyntheticGroupMessageNode is a view of a GroupNode that implements MessageDeclNode.
+// Since a group field implicitly defines a message type, this node represents
+// that message type while the corresponding GroupNode represents the field.
+//
+// This type is considered synthetic since it never appears in a file's AST, but
+// is only returned from other accessors (e.g. GroupNode.AsMessage).
+type SyntheticGroupMessageNode GroupNode
+
+func (n *SyntheticGroupMessageNode) MessageName() Node {
 	return n.Name
 }
 
-// OneOfDeclNode is a node in the AST that defines a oneof. There are
+func (n *SyntheticGroupMessageNode) RangeOptions(fn func(*OptionNode) bool) {
+	for _, decl := range n.Decls {
+		if opt, ok := decl.(*OptionNode); ok {
+			if !fn(opt) {
+				return
+			}
+		}
+	}
+}
+
+// OneofDeclNode is a node in the AST that defines a oneof. There are
 // multiple types of AST nodes that declare oneofs:
-//   - *OneOfNode
-//   - *SyntheticOneOf
+//   - *OneofNode
+//   - *SyntheticOneof
 //
 // This also allows NoSourceNode to be used in place of one of the above
 // for some usages.
-type OneOfDeclNode interface {
-	Node
-	OneOfName() Node
+type OneofDeclNode interface {
+	NodeWithOptions
+	OneofName() Node
 }
 
-// OneOfNode represents a one-of declaration. Example:
+var _ OneofDeclNode = (*OneofNode)(nil)
+var _ OneofDeclNode = (*SyntheticOneof)(nil)
+var _ OneofDeclNode = (*NoSourceNode)(nil)
+
+// OneofNode represents a one-of declaration. Example:
 //
 //	oneof query {
 //	  string by_name = 2;
@@ -342,18 +404,18 @@ type OneOfDeclNode interface {
 //	  Address by_address = 4;
 //	  Labels by_label = 5;
 //	}
-type OneOfNode struct {
+type OneofNode struct {
 	compositeNode
 	Keyword    *KeywordNode
 	Name       *IdentNode
 	OpenBrace  *RuneNode
-	Decls      []OneOfElement
+	Decls      []OneofElement
 	CloseBrace *RuneNode
 }
 
-func (*OneOfNode) msgElement() {}
+func (*OneofNode) msgElement() {}
 
-// NewOneOfNode creates a new *OneOfNode. All arguments must be non-nil. While
+// NewOneofNode creates a new *OneofNode. All arguments must be non-nil. While
 // it is technically allowed for decls to be nil or empty, the resulting node
 // will not be a valid oneof, which must have at least one field.
 //   - keyword: The token corresponding to the "oneof" keyword.
@@ -361,7 +423,7 @@ func (*OneOfNode) msgElement() {}
 //   - openBrace: The token corresponding to the "{" rune that starts the body.
 //   - decls: All declarations inside the oneof body.
 //   - closeBrace: The token corresponding to the "}" rune that ends the body.
-func NewOneOfNode(keyword *KeywordNode, name *IdentNode, openBrace *RuneNode, decls []OneOfElement, closeBrace *RuneNode) *OneOfNode {
+func NewOneofNode(keyword *KeywordNode, name *IdentNode, openBrace *RuneNode, decls []OneofElement, closeBrace *RuneNode) *OneofNode {
 	if keyword == nil {
 		panic("keyword is nil")
 	}
@@ -385,11 +447,11 @@ func NewOneOfNode(keyword *KeywordNode, name *IdentNode, openBrace *RuneNode, de
 		switch decl := decl.(type) {
 		case *OptionNode, *FieldNode, *GroupNode, *EmptyDeclNode:
 		default:
-			panic(fmt.Sprintf("invalid OneOfElement type: %T", decl))
+			panic(fmt.Sprintf("invalid OneofElement type: %T", decl))
 		}
 	}
 
-	return &OneOfNode{
+	return &OneofNode{
 		compositeNode: compositeNode{
 			children: children,
 		},
@@ -401,54 +463,71 @@ func NewOneOfNode(keyword *KeywordNode, name *IdentNode, openBrace *RuneNode, de
 	}
 }
 
-func (n *OneOfNode) OneOfName() Node {
+func (n *OneofNode) OneofName() Node {
 	return n.Name
 }
 
-// OneOfElement is an interface implemented by all AST nodes that can
-// appear in the body of a oneof declaration.
-type OneOfElement interface {
-	Node
-	oneOfElement()
+func (n *OneofNode) RangeOptions(fn func(*OptionNode) bool) {
+	for _, decl := range n.Decls {
+		if opt, ok := decl.(*OptionNode); ok {
+			if !fn(opt) {
+				return
+			}
+		}
+	}
 }
 
-var _ OneOfElement = (*OptionNode)(nil)
-var _ OneOfElement = (*FieldNode)(nil)
-var _ OneOfElement = (*GroupNode)(nil)
-var _ OneOfElement = (*EmptyDeclNode)(nil)
+// OneofElement is an interface implemented by all AST nodes that can
+// appear in the body of a oneof declaration.
+type OneofElement interface {
+	Node
+	oneofElement()
+}
 
-// SyntheticOneOf is not an actual node in the AST but a synthetic node
+var _ OneofElement = (*OptionNode)(nil)
+var _ OneofElement = (*FieldNode)(nil)
+var _ OneofElement = (*GroupNode)(nil)
+var _ OneofElement = (*EmptyDeclNode)(nil)
+
+// SyntheticOneof is not an actual node in the AST but a synthetic node
 // that represents the oneof implied by a proto3 optional field.
-type SyntheticOneOf struct {
+//
+// This type is considered synthetic since it never appears in a file's AST,
+// but is only returned from other functions (e.g. NewSyntheticOneof).
+type SyntheticOneof struct {
+	// The proto3 optional field that implies the presence of this oneof.
 	Field *FieldNode
 }
 
-var _ Node = (*SyntheticOneOf)(nil)
+var _ Node = (*SyntheticOneof)(nil)
 
-// NewSyntheticOneOf creates a new *SyntheticOneOf that corresponds to the
+// NewSyntheticOneof creates a new *SyntheticOneof that corresponds to the
 // given proto3 optional field.
-func NewSyntheticOneOf(field *FieldNode) *SyntheticOneOf {
-	return &SyntheticOneOf{Field: field}
+func NewSyntheticOneof(field *FieldNode) *SyntheticOneof {
+	return &SyntheticOneof{Field: field}
 }
 
-func (n *SyntheticOneOf) Start() Token {
+func (n *SyntheticOneof) Start() Token {
 	return n.Field.Start()
 }
 
-func (n *SyntheticOneOf) End() Token {
+func (n *SyntheticOneof) End() Token {
 	return n.Field.End()
 }
 
-func (n *SyntheticOneOf) LeadingComments() []Comment {
+func (n *SyntheticOneof) LeadingComments() []Comment {
 	return nil
 }
 
-func (n *SyntheticOneOf) TrailingComments() []Comment {
+func (n *SyntheticOneof) TrailingComments() []Comment {
 	return nil
 }
 
-func (n *SyntheticOneOf) OneOfName() Node {
+func (n *SyntheticOneof) OneofName() Node {
 	return n.Field.FieldName()
+}
+
+func (n *SyntheticOneof) RangeOptions(_ func(*OptionNode) bool) {
 }
 
 // MapTypeNode represents the type declaration for a map field. It defines
@@ -535,25 +614,33 @@ func NewMapFieldNode(mapType *MapTypeNode, name *IdentNode, equals *RuneNode, ta
 	if name == nil {
 		panic("name is nil")
 	}
-	if equals == nil {
-		panic("equals is nil")
+	numChildren := 2
+	if equals != nil {
+		numChildren++
 	}
-	if tag == nil {
-		panic("tag is nil")
+	if tag != nil {
+		numChildren++
 	}
-	if semicolon == nil {
-		panic("semicolon is nil")
-	}
-	numChildren := 5
 	if opts != nil {
 		numChildren++
 	}
+	if semicolon != nil {
+		numChildren++
+	}
 	children := make([]Node, 0, numChildren)
-	children = append(children, mapType, name, equals, tag)
+	children = append(children, mapType, name)
+	if equals != nil {
+		children = append(children, equals)
+	}
+	if tag != nil {
+		children = append(children, tag)
+	}
 	if opts != nil {
 		children = append(children, opts)
 	}
-	children = append(children, semicolon)
+	if semicolon != nil {
+		children = append(children, semicolon)
+	}
 
 	return &MapFieldNode{
 		compositeNode: compositeNode{
@@ -581,6 +668,9 @@ func (n *MapFieldNode) FieldType() Node {
 }
 
 func (n *MapFieldNode) FieldTag() Node {
+	if n.Tag == nil {
+		return n
+	}
 	return n.Tag
 }
 
@@ -596,8 +686,16 @@ func (n *MapFieldNode) GetOptions() *CompactOptionsNode {
 	return n.Options
 }
 
-func (n *MapFieldNode) MessageName() Node {
-	return n.Name
+func (n *MapFieldNode) RangeOptions(fn func(*OptionNode) bool) {
+	for _, opt := range n.Options.Options {
+		if !fn(opt) {
+			return
+		}
+	}
+}
+
+func (n *MapFieldNode) AsMessage() *SyntheticMapEntryNode {
+	return (*SyntheticMapEntryNode)(n)
 }
 
 func (n *MapFieldNode) KeyField() *SyntheticMapField {
@@ -608,9 +706,28 @@ func (n *MapFieldNode) ValueField() *SyntheticMapField {
 	return NewSyntheticMapField(n.MapType.ValueType, 2)
 }
 
+// SyntheticMapEntryNode is a view of a MapFieldNode that implements MessageDeclNode.
+// Since a map field implicitly defines a message type for the map entry,
+// this node represents that message type.
+//
+// This type is considered synthetic since it never appears in a file's AST, but
+// is only returned from other accessors (e.g. MapFieldNode.AsMessage).
+type SyntheticMapEntryNode MapFieldNode
+
+func (n *SyntheticMapEntryNode) MessageName() Node {
+	return n.Name
+}
+
+func (n *SyntheticMapEntryNode) RangeOptions(_ func(*OptionNode) bool) {
+}
+
 // SyntheticMapField is not an actual node in the AST but a synthetic node
 // that implements FieldDeclNode. These are used to represent the implicit
 // field declarations of the "key" and "value" fields in a map entry.
+//
+// This type is considered synthetic since it never appears in a file's AST,
+// but is only returned from other accessors and functions (e.g.
+// MapFieldNode.KeyField, MapFieldNode.ValueField, and NewSyntheticMapField).
 type SyntheticMapField struct {
 	Ident IdentValueNode
 	Tag   *UintLiteralNode
@@ -656,6 +773,9 @@ func (n *SyntheticMapField) FieldType() Node {
 }
 
 func (n *SyntheticMapField) FieldTag() Node {
+	if n.Tag == nil {
+		return n
+	}
 	return n.Tag
 }
 
@@ -669,4 +789,7 @@ func (n *SyntheticMapField) GetGroupKeyword() Node {
 
 func (n *SyntheticMapField) GetOptions() *CompactOptionsNode {
 	return nil
+}
+
+func (n *SyntheticMapField) RangeOptions(_ func(*OptionNode) bool) {
 }

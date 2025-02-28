@@ -1,4 +1,4 @@
-// Copyright 2020-2022 Buf Technologies, Inc.
+// Copyright 2020-2024 Buf Technologies, Inc.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -33,7 +33,7 @@ type ExtensionRangeNode struct {
 	Semicolon *RuneNode
 }
 
-func (e *ExtensionRangeNode) msgElement() {}
+func (*ExtensionRangeNode) msgElement() {}
 
 // NewExtensionRangeNode creates a new *ExtensionRangeNode. All args must be
 // non-nil except opts, which may be nil.
@@ -90,6 +90,14 @@ func NewExtensionRangeNode(keyword *KeywordNode, ranges []*RangeNode, commas []*
 	}
 }
 
+func (e *ExtensionRangeNode) RangeOptions(fn func(*OptionNode) bool) {
+	for _, opt := range e.Options.Options {
+		if !fn(opt) {
+			return
+		}
+	}
+}
+
 // RangeDeclNode is a placeholder interface for AST nodes that represent
 // numeric values. This allows NoSourceNode to be used in place of *RangeNode
 // for some usages.
@@ -100,7 +108,7 @@ type RangeDeclNode interface {
 }
 
 var _ RangeDeclNode = (*RangeNode)(nil)
-var _ RangeDeclNode = NoSourceNode{}
+var _ RangeDeclNode = (*NoSourceNode)(nil)
 
 // RangeNode represents a range expression, used in both extension ranges and
 // reserved ranges. Example:
@@ -121,16 +129,16 @@ type RangeNode struct {
 // then so must be exactly one of end or max. If max is non-nil, it indicates a
 // "100 to max" style range. But if end is non-nil, the end of the range is a
 // literal, such as "100 to 200".
-func NewRangeNode(start IntValueNode, to *KeywordNode, end IntValueNode, max *KeywordNode) *RangeNode {
+func NewRangeNode(start IntValueNode, to *KeywordNode, end IntValueNode, maxEnd *KeywordNode) *RangeNode {
 	if start == nil {
 		panic("start is nil")
 	}
 	numChildren := 1
 	if to != nil {
-		if end == nil && max == nil {
+		if end == nil && maxEnd == nil {
 			panic("to is not nil, but end and max both are")
 		}
-		if end != nil && max != nil {
+		if end != nil && maxEnd != nil {
 			panic("end and max cannot be both non-nil")
 		}
 		numChildren = 3
@@ -138,7 +146,7 @@ func NewRangeNode(start IntValueNode, to *KeywordNode, end IntValueNode, max *Ke
 		if end != nil {
 			panic("to is nil, but end is not")
 		}
-		if max != nil {
+		if maxEnd != nil {
 			panic("to is nil, but max is not")
 		}
 	}
@@ -149,7 +157,7 @@ func NewRangeNode(start IntValueNode, to *KeywordNode, end IntValueNode, max *Ke
 		if end != nil {
 			children = append(children, end)
 		} else {
-			children = append(children, max)
+			children = append(children, maxEnd)
 		}
 	}
 	return &RangeNode{
@@ -159,7 +167,7 @@ func NewRangeNode(start IntValueNode, to *KeywordNode, end IntValueNode, max *Ke
 		StartVal: start,
 		To:       to,
 		EndVal:   end,
-		Max:      max,
+		Max:      maxEnd,
 	}
 }
 
@@ -181,8 +189,8 @@ func (n *RangeNode) StartValue() interface{} {
 	return n.StartVal.Value()
 }
 
-func (n *RangeNode) StartValueAsInt32(min, max int32) (int32, bool) {
-	return AsInt32(n.StartVal, min, max)
+func (n *RangeNode) StartValueAsInt32(minVal, maxVal int32) (int32, bool) {
+	return AsInt32(n.StartVal, minVal, maxVal)
 }
 
 func (n *RangeNode) EndValue() interface{} {
@@ -192,14 +200,14 @@ func (n *RangeNode) EndValue() interface{} {
 	return n.EndVal.Value()
 }
 
-func (n *RangeNode) EndValueAsInt32(min, max int32) (int32, bool) {
+func (n *RangeNode) EndValueAsInt32(minVal, maxVal int32) (int32, bool) {
 	if n.Max != nil {
-		return max, true
+		return maxVal, true
 	}
 	if n.EndVal == nil {
-		return n.StartValueAsInt32(min, max)
+		return n.StartValueAsInt32(minVal, maxVal)
 	}
-	return AsInt32(n.EndVal, min, max)
+	return AsInt32(n.EndVal, minVal, maxVal)
 }
 
 // ReservedNode represents reserved declaration, which can be used to reserve
@@ -207,13 +215,20 @@ func (n *RangeNode) EndValueAsInt32(min, max int32) (int32, bool) {
 //
 //	reserved 1, 10-12, 15;
 //	reserved "foo", "bar", "baz";
+//	reserved foo, bar, baz;
 type ReservedNode struct {
 	compositeNode
 	Keyword *KeywordNode
-	// If non-empty, this node represents reserved ranges and Names will be empty.
+	// If non-empty, this node represents reserved ranges, and Names and Identifiers
+	// will be empty.
 	Ranges []*RangeNode
-	// If non-empty, this node represents reserved names and Ranges will be empty.
+	// If non-empty, this node represents reserved names as string literals, and
+	// Ranges and Identifiers will be empty. String literals are used for reserved
+	// names in proto2 and proto3 syntax.
 	Names []StringValueNode
+	// If non-empty, this node represents reserved names as identifiers, and Ranges
+	// and Names will be empty. Identifiers are used for reserved names in editions.
+	Identifiers []*IdentNode
 	// Commas represent the separating ',' characters between options. The
 	// length of this slice must be exactly len(Ranges)-1 or len(Names)-1, depending
 	// on whether this node represents reserved ranges or reserved names. Each item
@@ -283,16 +298,17 @@ func NewReservedNamesNode(keyword *KeywordNode, names []StringValueNode, commas 
 	if keyword == nil {
 		panic("keyword is nil")
 	}
-	if semicolon == nil {
-		panic("semicolon is nil")
-	}
 	if len(names) == 0 {
 		panic("must have at least one name")
 	}
 	if len(commas) != len(names)-1 {
 		panic(fmt.Sprintf("%d names requires %d commas, not %d", len(names), len(names)-1, len(commas)))
 	}
-	children := make([]Node, 0, len(names)*2+1)
+	numChildren := len(names) * 2
+	if semicolon != nil {
+		numChildren++
+	}
+	children := make([]Node, 0, numChildren)
 	children = append(children, keyword)
 	for i, name := range names {
 		if i > 0 {
@@ -306,7 +322,9 @@ func NewReservedNamesNode(keyword *KeywordNode, names []StringValueNode, commas 
 		}
 		children = append(children, name)
 	}
-	children = append(children, semicolon)
+	if semicolon != nil {
+		children = append(children, semicolon)
+	}
 	return &ReservedNode{
 		compositeNode: compositeNode{
 			children: children,
@@ -315,5 +333,54 @@ func NewReservedNamesNode(keyword *KeywordNode, names []StringValueNode, commas 
 		Names:     names,
 		Commas:    commas,
 		Semicolon: semicolon,
+	}
+}
+
+// NewReservedIdentifiersNode creates a new *ReservedNode that represents reserved
+// names. All args must be non-nil.
+//   - keyword: The token corresponding to the "reserved" keyword.
+//   - names: One or more names.
+//   - commas: Tokens that represent the "," runes that delimit the names.
+//     The length of commas must be one less than the length of names.
+//   - semicolon The token corresponding to the ";" rune that ends the declaration.
+func NewReservedIdentifiersNode(keyword *KeywordNode, names []*IdentNode, commas []*RuneNode, semicolon *RuneNode) *ReservedNode {
+	if keyword == nil {
+		panic("keyword is nil")
+	}
+	if len(names) == 0 {
+		panic("must have at least one name")
+	}
+	if len(commas) != len(names)-1 {
+		panic(fmt.Sprintf("%d names requires %d commas, not %d", len(names), len(names)-1, len(commas)))
+	}
+	numChildren := len(names) * 2
+	if semicolon != nil {
+		numChildren++
+	}
+	children := make([]Node, 0, numChildren)
+	children = append(children, keyword)
+	for i, name := range names {
+		if i > 0 {
+			if commas[i-1] == nil {
+				panic(fmt.Sprintf("commas[%d] is nil", i-1))
+			}
+			children = append(children, commas[i-1])
+		}
+		if name == nil {
+			panic(fmt.Sprintf("names[%d] is nil", i))
+		}
+		children = append(children, name)
+	}
+	if semicolon != nil {
+		children = append(children, semicolon)
+	}
+	return &ReservedNode{
+		compositeNode: compositeNode{
+			children: children,
+		},
+		Keyword:     keyword,
+		Identifiers: names,
+		Commas:      commas,
+		Semicolon:   semicolon,
 	}
 }

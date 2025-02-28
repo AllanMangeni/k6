@@ -8,7 +8,7 @@ import (
 	"net/url"
 	"strings"
 
-	"github.com/dop251/goja"
+	"github.com/grafana/sobek"
 	"github.com/tidwall/gjson"
 
 	"go.k6.io/k6/js/common"
@@ -16,7 +16,7 @@ import (
 	"go.k6.io/k6/lib/netext/httpext"
 )
 
-// Response is a representation of an HTTP response to be returned to the goja VM
+// Response is a representation of an HTTP response to be returned to the Sobek VM
 type Response struct {
 	*httpext.Response `js:"-"`
 	client            *Client
@@ -61,8 +61,8 @@ func (res *Response) HTML(selector ...string) html.Selection {
 	return sel
 }
 
-// JSON parses the body of a response as JSON and returns it to the goja VM.
-func (res *Response) JSON(selector ...string) goja.Value {
+// JSON parses the body of a response as JSON and returns it to the Sobek VM.
+func (res *Response) JSON(selector ...string) sobek.Value {
 	rt := res.client.moduleInstance.vu.Runtime()
 
 	if res.Body == nil {
@@ -83,7 +83,7 @@ func (res *Response) JSON(selector ...string) goja.Value {
 		if hasSelector {
 			if !res.validatedJSON {
 				if !gjson.ValidBytes(body) {
-					return goja.Undefined()
+					return sobek.Undefined()
 				}
 				res.validatedJSON = true
 			}
@@ -91,7 +91,7 @@ func (res *Response) JSON(selector ...string) goja.Value {
 			result := gjson.GetBytes(body, selector[0])
 
 			if !result.Exists() {
-				return goja.Undefined()
+				return sobek.Undefined()
 			}
 			return rt.ToValue(result.Value())
 		}
@@ -134,13 +134,13 @@ func checkErrorInJSON(input []byte, offset int, err error) error {
 
 // SubmitForm parses the body as an html looking for a from and then submitting it
 // TODO: document the actual arguments that can be provided
-func (res *Response) SubmitForm(args ...goja.Value) (*Response, error) {
+func (res *Response) SubmitForm(args ...sobek.Value) (*Response, error) {
 	rt := res.client.moduleInstance.vu.Runtime()
 
 	formSelector := "form"
 	submitSelector := "[type=\"submit\"]"
-	var fields map[string]goja.Value
-	requestParams := goja.Null()
+	var fields map[string]sobek.Value
+	requestParams := sobek.Null()
 	if len(args) > 0 {
 		params := args[0].ToObject(rt)
 		for _, k := range params.Keys() {
@@ -166,7 +166,7 @@ func (res *Response) SubmitForm(args ...goja.Value) (*Response, error) {
 
 	methodAttr := form.Attr("method")
 	var requestMethod string
-	if methodAttr == goja.Undefined() {
+	if methodAttr == sobek.Undefined() {
 		// Use GET by default
 		requestMethod = http.MethodGet
 	} else {
@@ -180,7 +180,7 @@ func (res *Response) SubmitForm(args ...goja.Value) (*Response, error) {
 
 	actionAttr := form.Attr("action")
 	var requestURL *url.URL
-	if actionAttr == goja.Undefined() {
+	if actionAttr == sobek.Undefined() {
 		// Use the url of the response if no action is set
 		requestURL = responseURL
 	} else {
@@ -198,7 +198,7 @@ func (res *Response) SubmitForm(args ...goja.Value) (*Response, error) {
 	submit := form.Find(submitSelector)
 	submitName := submit.Attr("name")
 	submitValue := submit.Val()
-	if submitName != goja.Undefined() && submitValue != goja.Undefined() {
+	if submitName != sobek.Undefined() && submitValue != sobek.Undefined() {
 		values[submitName.String()] = submitValue
 	}
 
@@ -213,7 +213,7 @@ func (res *Response) SubmitForm(args ...goja.Value) (*Response, error) {
 			q.Add(k, v.String())
 		}
 		requestURL.RawQuery = q.Encode()
-		return res.client.Request(requestMethod, rt.ToValue(requestURL.String()), goja.Null(), requestParams)
+		return res.client.Request(requestMethod, rt.ToValue(requestURL.String()), sobek.Null(), requestParams)
 	}
 	return res.client.Request(
 		requestMethod, rt.ToValue(requestURL.String()),
@@ -223,11 +223,11 @@ func (res *Response) SubmitForm(args ...goja.Value) (*Response, error) {
 
 // ClickLink parses the body as an html, looks for a link and than makes a request as if the link was
 // clicked
-func (res *Response) ClickLink(args ...goja.Value) (*Response, error) {
+func (res *Response) ClickLink(args ...sobek.Value) (*Response, error) {
 	rt := res.client.moduleInstance.vu.Runtime()
 
 	selector := "a[href]"
-	requestParams := goja.Null()
+	requestParams := sobek.Null()
 	if len(args) > 0 {
 		params := args[0].ToObject(rt)
 		for _, k := range params.Keys() {
@@ -250,8 +250,9 @@ func (res *Response) ClickLink(args ...goja.Value) (*Response, error) {
 		common.Throw(rt, fmt.Errorf("no element found for selector '%s' in response '%s'", selector, res.URL))
 	}
 	hrefAttr := link.Attr("href")
-	if hrefAttr == goja.Undefined() {
-		common.Throw(rt, fmt.Errorf("no valid href attribute value found on element '%s' in response '%s'", selector, res.URL))
+	if hrefAttr == sobek.Undefined() {
+		errmsg := fmt.Errorf("no valid href attribute value found on element '%s' in response '%s'", selector, res.URL)
+		common.Throw(rt, errmsg)
 	}
 	hrefURL, err := url.Parse(hrefAttr.String())
 	if err != nil {
@@ -259,5 +260,5 @@ func (res *Response) ClickLink(args ...goja.Value) (*Response, error) {
 	}
 	requestURL := responseURL.ResolveReference(hrefURL)
 
-	return res.client.Request(http.MethodGet, rt.ToValue(requestURL.String()), goja.Undefined(), requestParams)
+	return res.client.Request(http.MethodGet, rt.ToValue(requestURL.String()), sobek.Undefined(), requestParams)
 }

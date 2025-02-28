@@ -9,6 +9,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.k6.io/k6/lib"
 	"go.k6.io/k6/metrics"
 )
 
@@ -87,7 +88,7 @@ func myFormHandler(w http.ResponseWriter, r *http.Request) {
 	_, _ = w.Write(body)
 }
 
-func jsonHandler(w http.ResponseWriter, r *http.Request) {
+func jsonHandler(w http.ResponseWriter, _ *http.Request) {
 	body := []byte(jsonData)
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Content-Length", fmt.Sprintf("%d", len(body)))
@@ -95,7 +96,7 @@ func jsonHandler(w http.ResponseWriter, r *http.Request) {
 	_, _ = w.Write(body)
 }
 
-func invalidJSONHandler(w http.ResponseWriter, r *http.Request) {
+func invalidJSONHandler(w http.ResponseWriter, _ *http.Request) {
 	body := []byte(invalidJSONData)
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Content-Length", fmt.Sprintf("%d", len(body)))
@@ -103,14 +104,12 @@ func invalidJSONHandler(w http.ResponseWriter, r *http.Request) {
 	_, _ = w.Write(body)
 }
 
-//nolint:paralleltest
 func TestResponse(t *testing.T) {
 	ts := newTestCase(t)
 	tb := ts.tb
 	samples := ts.samples
 	rt := ts.runtime.VU.Runtime()
 	state := ts.runtime.VU.State()
-	root := state.Group
 	sr := tb.Replacer.Replace
 
 	tb.Mux.HandleFunc("/myforms/get", myFormHandler)
@@ -148,17 +147,14 @@ func TestResponse(t *testing.T) {
 		})
 
 		t.Run("group", func(t *testing.T) {
-			g, err := root.Group("my group")
+			groupName, err := lib.NewGroupPath(lib.RootGroupPath, "my group")
 			require.NoError(t, err)
-			old := state.Group
-			state.Group = g
 			state.Tags.Modify(func(tagsAndMeta *metrics.TagsAndMeta) {
-				tagsAndMeta.SetTag("group", g.Path)
+				tagsAndMeta.SetTag("group", groupName)
 			})
 			defer func() {
-				state.Group = old
 				state.Tags.Modify(func(tagsAndMeta *metrics.TagsAndMeta) {
-					tagsAndMeta.SetTag("group", old.Path)
+					tagsAndMeta.SetTag("group", "")
 				})
 			}()
 
@@ -190,13 +186,11 @@ func TestResponse(t *testing.T) {
 
 		t.Run("Invalid", func(t *testing.T) {
 			_, err := rt.RunString(sr(`http.request("GET", "HTTPBIN_URL/html").json();`))
-			//nolint:lll
 			assert.Contains(t, err.Error(), "cannot parse json due to an error at line 1, character 2 , error: invalid character '<' looking for beginning of value")
 		})
 
 		t.Run("Invalid", func(t *testing.T) {
 			_, err := rt.RunString(sr(`http.request("GET", "HTTPBIN_URL/invalidjson").json();`))
-			//nolint:lll
 			assert.Contains(t, err.Error(), "cannot parse json due to an error at line 3, character 9 , error: invalid character 'e' in literal true (expecting 'r')")
 		})
 

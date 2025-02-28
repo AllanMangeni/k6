@@ -10,10 +10,16 @@ import (
 	"github.com/sirupsen/logrus"
 
 	"go.k6.io/k6/errext"
-	"go.k6.io/k6/execution"
+	"go.k6.io/k6/internal/execution"
+	"go.k6.io/k6/internal/ui/pb"
 	"go.k6.io/k6/lib"
 	"go.k6.io/k6/lib/types"
-	"go.k6.io/k6/ui/pb"
+)
+
+const (
+	// maxConcurrentVUs is an arbitrary limit for sanity checks.
+	// It prevents running an exaggeratedly large number of concurrent VUs which may lead to an out-of-memory.
+	maxConcurrentVUs int = 100_000_000
 )
 
 func sumStagesDuration(stages []Stage) (result time.Duration) {
@@ -24,13 +30,34 @@ func sumStagesDuration(stages []Stage) (result time.Duration) {
 }
 
 func getStagesUnscaledMaxTarget(unscaledStartValue int64, stages []Stage) int64 {
-	max := unscaledStartValue
+	result := unscaledStartValue
 	for _, s := range stages {
-		if s.Target.Int64 > max {
-			max = s.Target.Int64
+		if s.Target.Int64 > result {
+			result = s.Target.Int64
 		}
 	}
-	return max
+	return result
+}
+
+// validateTargetShifts validates the VU Target shifts.
+// It will append an error for any VU target that is larger than the maximum value allowed.
+// Each Stage needs a Target value. The stages array can be empty. The Targes could be negative.
+func validateTargetShifts(startVUs int64, stages []Stage) []error {
+	var errors []error
+
+	if startVUs > int64(maxConcurrentVUs) {
+		errors = append(errors, fmt.Errorf(
+			"the startVUs exceed max limit of %d", maxConcurrentVUs))
+	}
+
+	for i := 0; i < len(stages); i++ {
+		if stages[i].Target.Int64 > int64(maxConcurrentVUs) {
+			errors = append(errors, fmt.Errorf(
+				"target for stage %d exceeds max limit of %d", i+1, maxConcurrentVUs))
+		}
+	}
+
+	return errors
 }
 
 // A helper function to avoid code duplication

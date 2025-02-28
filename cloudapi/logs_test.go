@@ -4,7 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io/ioutil"
+	"io"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -20,11 +20,12 @@ import (
 	"github.com/stretchr/testify/require"
 	"gopkg.in/guregu/null.v3"
 
-	"go.k6.io/k6/lib/testutils"
-	"go.k6.io/k6/lib/testutils/httpmultibin"
+	"go.k6.io/k6/internal/lib/testutils"
+	"go.k6.io/k6/internal/lib/testutils/httpmultibin"
 )
 
 func TestMsgParsing(t *testing.T) {
+	t.Parallel()
 	m := `{
   "streams": [
     {
@@ -71,6 +72,7 @@ func TestMsgParsing(t *testing.T) {
 }
 
 func TestMSGLog(t *testing.T) {
+	t.Parallel()
 	expectMsg := msg{
 		Streams: []msgStreams{
 			{
@@ -91,7 +93,7 @@ func TestMSGLog(t *testing.T) {
 	}
 
 	logger := logrus.New()
-	logger.Out = ioutil.Discard
+	logger.Out = io.Discard
 	hook := testutils.NewLogHook()
 	logger.AddHook(hook)
 	expectMsg.Log(logger)
@@ -148,7 +150,9 @@ func TestRetry(t *testing.T) {
 		}
 
 		for _, tt := range tests {
+			tt := tt
 			t.Run(tt.name, func(t *testing.T) {
+				t.Parallel()
 				var sleepRequests []time.Duration
 				// sleepCollector tracks the request duration value for sleep requests.
 				sleepCollector := sleeperFunc(func(d time.Duration) {
@@ -244,12 +248,12 @@ func TestStreamLogsToLogger(t *testing.T) {
 			require.NoError(t, err)
 
 			// wait the flush on the network
-			time.Sleep(5 * time.Millisecond)
+			time.Sleep(100 * time.Millisecond)
 			cancel()
 		})
 
 		logger := logrus.New()
-		logger.Out = ioutil.Discard
+		logger.Out = io.Discard
 		hook := testutils.NewLogHook()
 		logger.AddHook(hook)
 
@@ -321,7 +325,7 @@ func TestStreamLogsToLogger(t *testing.T) {
 		})
 
 		logger := logrus.New()
-		logger.Out = ioutil.Discard
+		logger.Out = io.Discard
 		hook := testutils.NewLogHook()
 		logger.AddHook(hook)
 
@@ -389,7 +393,7 @@ func TestStreamLogsToLogger(t *testing.T) {
 		})
 
 		logger := logrus.New()
-		logger.Out = ioutil.Discard
+		logger.Out = io.Discard
 		hook := testutils.NewLogHook()
 		logger.AddHook(hook)
 

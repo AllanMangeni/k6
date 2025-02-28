@@ -1,4 +1,4 @@
-// Copyright 2020-2022 Buf Technologies, Inc.
+// Copyright 2020-2024 Buf Technologies, Inc.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -64,12 +64,14 @@ type SearchResult struct {
 	// proto in one. When a parser result is available, it is more efficient
 	// than using an AST search result, since the descriptor proto need not be
 	// re-created. And it provides better error messages than a descriptor proto
-	// search results, since the AST has greater fidelity with regard to source
+	// search result, since the AST has greater fidelity with regard to source
 	// positions (even if the descriptor proto includes source code info).
 	ParseResult parser.Result
 	// A fully linked descriptor that represents the file. If this field is set,
-	// then the compiler has no additional work to do for this file as it is
-	// already compiled.
+	// then the compiler has little or no additional work to do for this file as
+	// it is already compiled. If this value implements linker.File, there is no
+	// additional work. Otherwise, the additional work is to compute an index of
+	// symbols in the file, for efficient lookup.
 	Desc protoreflect.FileDescriptor
 }
 
@@ -178,6 +180,27 @@ func SourceAccessorFromMap(srcs map[string]string) func(string) (io.ReadCloser, 
 
 // WithStandardImports returns a new resolver that knows about the same standard
 // imports that are included with protoc.
+//
+// Note that this uses the descriptors embedded in generated code in the packages
+// of the Protobuf Go module, except for "google/protobuf/cpp_features.proto" and
+// "google/protobuf/java_features.proto". For those two files, compiled descriptors
+// are embedded in this module because there is no package in the Protobuf Go module
+// that contains generated code for those files. This resolver also provides results
+// for the "google/protobuf/go_features.proto", which is technically not a standard
+// file (it is not included with protoc) but is included in generated code in the
+// Protobuf Go module.
+//
+// As of v0.14.0 of this module (and v1.34.2 of the Protobuf Go module and v27.0 of
+// Protobuf), the contents of the standard import "google/protobuf/descriptor.proto"
+// contain extension declarations which are *absent* from the descriptors that this
+// resolver returns. That is because extension declarations are only retained in
+// source, not at runtime, which means they are not available in the embedded
+// descriptors in generated code.
+//
+// To use versions of the standard imports that *do* include these extension
+// declarations, see wellknownimports.WithStandardImports instead. As of this
+// writing, the declarations are only needed to prevent source files from
+// illegally re-defining the custom features for C++, Java, and Go.
 func WithStandardImports(r Resolver) Resolver {
 	return ResolverFunc(func(name string) (SearchResult, error) {
 		res, err := r.FindFileByPath(name)

@@ -2,15 +2,15 @@ package executor
 
 import (
 	"context"
-	"io/ioutil"
+	"io"
 	"testing"
 
 	"github.com/sirupsen/logrus"
 	"github.com/stretchr/testify/require"
 
+	"go.k6.io/k6/internal/lib/testutils"
+	"go.k6.io/k6/internal/lib/testutils/minirunner"
 	"go.k6.io/k6/lib"
-	"go.k6.io/k6/lib/testutils"
-	"go.k6.io/k6/lib/testutils/minirunner"
 	"go.k6.io/k6/metrics"
 )
 
@@ -50,10 +50,10 @@ func setupExecutor(t testing.TB, config lib.ExecutorConfig, es *lib.ExecutionSta
 	logHook := testutils.NewLogHook(logrus.WarnLevel)
 	testLog := logrus.New()
 	testLog.AddHook(logHook)
-	testLog.SetOutput(ioutil.Discard)
+	testLog.SetOutput(io.Discard)
 	logEntry := logrus.NewEntry(testLog)
 
-	initVUFunc := func(_ context.Context, logger *logrus.Entry) (lib.InitializedVU, error) {
+	initVUFunc := func(_ context.Context, _ *logrus.Entry) (lib.InitializedVU, error) {
 		idl, idg := es.GetUniqueVUIdentifiers()
 		return es.Test.Runner.NewVU(ctx, idl, idg, engineOut)
 	}
@@ -87,12 +87,13 @@ type executorTest struct {
 	options lib.Options
 	state   *lib.ExecutionState
 
-	ctx      context.Context //nolint
+	ctx      context.Context
 	cancel   context.CancelFunc
 	executor lib.Executor
 	logHook  *testutils.SimpleLogrusHook
 }
 
+//nolint:unparam
 func setupExecutorTest(
 	t testing.TB, segmentStr, sequenceStr string, extraOptions lib.Options,
 	runner lib.Runner, config lib.ExecutorConfig,

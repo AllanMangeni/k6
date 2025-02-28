@@ -49,7 +49,7 @@ func getTestConstantArrivalRateConfig() *ConstantArrivalRateConfig {
 func TestConstantArrivalRateRunNotEnoughAllocatedVUsWarn(t *testing.T) {
 	t.Parallel()
 
-	runner := simpleRunner(func(ctx context.Context, _ *lib.State) error {
+	runner := simpleRunner(func(_ context.Context, _ *lib.State) error {
 		time.Sleep(time.Second)
 		return nil
 	})
@@ -73,7 +73,7 @@ func TestConstantArrivalRateRunCorrectRate(t *testing.T) {
 	t.Parallel()
 
 	var count int64
-	runner := simpleRunner(func(ctx context.Context, _ *lib.State) error {
+	runner := simpleRunner(func(_ context.Context, _ *lib.State) error {
 		atomic.AddInt64(&count, 1)
 		return nil
 	})
@@ -88,8 +88,13 @@ func TestConstantArrivalRateRunCorrectRate(t *testing.T) {
 		// check that we got around the amount of VU iterations as we would expect
 		var totalCount int64
 
-		for i := 0; i < 5; i++ {
-			time.Sleep(time.Second)
+		i := 5
+		ticker := time.NewTicker(time.Second)
+		for range ticker.C {
+			i--
+			if i == 0 {
+				break
+			}
 			currentCount := atomic.SwapInt64(&count, 0)
 			totalCount += currentCount
 			// We have a relatively relaxed constraint here, but we also check
@@ -107,7 +112,7 @@ func TestConstantArrivalRateRunCorrectRate(t *testing.T) {
 	require.Empty(t, test.logHook.Drain())
 }
 
-//nolint:tparallel,paralleltest // this is flaky if ran with other tests
+//nolint:paralleltest // this is flaky if ran with other tests
 func TestConstantArrivalRateRunCorrectTiming(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skipf("this test is very flaky on the Windows GitHub Action runners...")
@@ -171,7 +176,7 @@ func TestConstantArrivalRateRunCorrectTiming(t *testing.T) {
 			var count int64
 			startTime := time.Now()
 			expectedTimeInt64 := int64(test.start)
-			runner := simpleRunner(func(ctx context.Context, _ *lib.State) error {
+			runner := simpleRunner(func(_ context.Context, _ *lib.State) error {
 				current := atomic.AddInt64(&count, 1)
 
 				expectedTime := test.start
@@ -242,7 +247,7 @@ func TestArrivalRateCancel(t *testing.T) {
 			errCh := make(chan error, 1)
 			weAreDoneCh := make(chan struct{})
 
-			runner := simpleRunner(func(ctx context.Context, _ *lib.State) error {
+			runner := simpleRunner(func(_ context.Context, _ *lib.State) error {
 				select {
 				case <-ch:
 					<-ch
@@ -339,7 +344,7 @@ func TestConstantArrivalRateGlobalIters(t *testing.T) {
 
 			gotIters := []uint64{}
 			var mx sync.Mutex
-			runner := simpleRunner(func(ctx context.Context, state *lib.State) error {
+			runner := simpleRunner(func(_ context.Context, state *lib.State) error {
 				mx.Lock()
 				gotIters = append(gotIters, state.GetScenarioGlobalVUIter())
 				mx.Unlock()

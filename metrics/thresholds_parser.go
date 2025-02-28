@@ -9,7 +9,7 @@ import (
 )
 
 // thresholdExpression holds the parsed result of a threshold expression,
-// as described in: https://k6.io/docs/using-k6/thresholds/#threshold-syntax
+// as described in: https://grafana.com/docs/k6/latest/using-k6/thresholds/#threshold-syntax
 type thresholdExpression struct {
 	// AggregationMethod holds the aggregation method parsed
 	// from the threshold expression. Possible values are described
@@ -49,7 +49,7 @@ func (te *thresholdExpression) SinkKey() string {
 	return te.AggregationMethod
 }
 
-// parseThresholdAssertion parses a threshold condition expression,
+// parseThresholdExpression parses a threshold condition expression,
 // as defined in a JS script (for instance p(95)<1000), into a thresholdExpression
 // instance.
 //
@@ -142,9 +142,9 @@ var operatorTokens = [7]string{ //nolint:gochecknoglobals
 // their spaces.
 func scanThresholdExpression(input string) (string, string, string, error) {
 	for _, op := range operatorTokens {
-		substrings := strings.SplitN(input, op, 2)
-		if len(substrings) == 2 {
-			return strings.TrimSpace(substrings[0]), op, strings.TrimSpace(substrings[1]), nil
+		left, right, _ := strings.Cut(input, op)
+		if right != "" {
+			return strings.TrimSpace(left), op, strings.TrimSpace(right), nil
 		}
 	}
 
@@ -181,7 +181,7 @@ var aggregationMethodTokens = [8]string{ //nolint:gochecknoglobals
 	tokenPercentile,
 }
 
-// parseThresholdMethod will parse a threshold condition expression's method.
+// parseThresholdAggregationMethod will parse a threshold condition expression's method.
 // It assumes the provided input argument is already trimmed and cleaned up.
 // If it encounters a percentile method, it will parse it and verify it
 // boils down to an expression of the form: `p(float64)`, but will return

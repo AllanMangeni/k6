@@ -1,4 +1,17 @@
-<p align="center"><a href="https://k6.io/"><img src="assets/k6-logo-with-grafana.svg" alt="k6" width="258" height="210" /></a></p>
+<p align="center">
+  <a href="https://grafana.com/oss/k6/">
+    <picture>
+      <img src="assets/logo.svg" alt="Grafana k6" width="210" height="210" /><br>
+    </picture>
+    <br>
+    <picture>
+      <source media="(prefers-color-scheme: dark)" srcset="assets/grafana-labs-dark-theme.svg">
+      <source media="(prefers-color-scheme: light)" srcset="assets/grafana-labs.svg">
+      <img src="assets/grafana-labs.svg" alt="Grafana Labs" width="210" />
+    </picture>
+    <br>
+  </a>
+</p>
 
 <h3 align="center">Like unit testing, for performance</h3>
 <p align="center">Modern load testing for developers and testers in the DevOps era.</p>
@@ -10,12 +23,12 @@
  <a href="https://codecov.io/gh/grafana/k6"><img src="https://img.shields.io/codecov/c/github/grafana/k6/master.svg" alt="Codecov branch"></a>
   <br>
   <a href="https://twitter.com/k6_io"><img src="https://img.shields.io/badge/twitter-@k6_io-55acee.svg" alt="@k6_io on Twitter"></a>
-  <a href="https://k6.io/slack"><img src="https://img.shields.io/badge/Slack-k6-ff69b4.svg" alt="Slack channel"></a>
 </p>
 <p align="center">
     <a href="https://github.com/grafana/k6/releases">Download</a> ·
-    <a href="https://k6.io/docs">Documentation</a> ·
-    <a href="https://community.k6.io/">Community Forum</a>
+    <a href="https://grafana.com/docs/k6/latest/">Documentation</a> ·
+    <a href="https://community.grafana.com/c/grafana-k6/70">Community Forum</a> ·
+    <a href="https://github.com/orgs/grafana/projects/443/views/1">Public Roadmap</a>
 </p>
 
 <br/>
@@ -31,9 +44,10 @@ Its core features are:
 - **Tests as code.** Reuse scripts, modularize logic, version control, and integrate tests with your CI.
 - **A full-featured API.** The scripting API is packed with features that help you simulate real application traffic.
 - **An embedded JavaScript engine.** The performance of Go, the scripting familiarity of JavaScript.
-- **Multiple Protocol support**. HTTP, WebSockets, gRPC, and more.
+- **Multiple Protocol support**. HTTP, WebSockets, gRPC, Browser, and more.
 - **Large extension ecosystem.** You can extend k6 to support your needs. And many people have already shared their extensions with the community!
 - **Flexible metrics storage and visualization**. Summary statistics or granular metrics, exported to the service of your choice.
+- **Native integration with Grafana cloud**. [SaaS solution](https://grafana.com/products/cloud/k6/) for test execution, metrics correlation, data analysis, and more.
 
 This is what load testing looks like in the 21st century.
 
@@ -60,7 +74,7 @@ export const options = {
 
 // Simulated user behavior
 export default function () {
-  let res = http.get("https://test-api.k6.io/public/crocodiles/1/");
+  let res = http.get("https://quickpizza.grafana.com");
   // Validate response status
   check(res, { "status was 200": (r) => r.status == 200 });
   sleep(1);
@@ -72,18 +86,27 @@ You can run scripts like this on the CLI, or in your CI, or across a Kubernetes 
 ## Documentation
 
 The docs cover all aspects of using k6. Some highlights include:
-- [Get Started](https://k6.io/docs). Install, run a test, inspect results.
-- [HTTP requests](https://k6.io/docs/using-k6/http-requests/). Have your virtual users use HTTP methods.
-  Or, check the other [Protocols](https://k6.io/docs/using-k6/protocols/).
-- [Thresholds](https://k6.io/docs/using-k6/thresholds). Set goals for your test, and codify your SLOs.
-- [Options](https://k6.io/docs/using-k6/k6-options). Configure your load, duration, TLS certificates, and much, much more.
-- [Scenarios](https://k6.io/docs/using-k6/scenarios).
-  Choose how to model your workload: open models, closed models, constant RPS, fixed iterations, and more.
-- [Results output](https://k6.io/docs/results-output). Study, filter, and export your test results.
-- [JavaScript API](https://k6.io/docs/javascript-api). Reference and examples of all k6 modules.
-- [Extensions](https://k6.io/docs/extensions). Extend k6 for new protocols and use cases.
 
-These links barely scratch the surface! If you're looking for conceptual information, you can read about [Test types](https://k6.io/docs/test-types/introduction/), [Test strategies](https://k6.io/docs/testing-guides/), or one of the many informative [Blog posts](https://k6.io/blog).
+- [Get Started](https://grafana.com/docs/k6/latest/). Install, run a test, inspect results.
+- [HTTP requests](https://grafana.com/docs/k6/latest/using-k6/http-requests/). Have your virtual users use HTTP methods.
+  Or, check the other [Protocols](https://grafana.com/docs/k6/latest/using-k6/protocols/).
+- [Thresholds](https://grafana.com/docs/k6/latest/using-k6/thresholds/). Set goals for your test, and codify your SLOs.
+- [Options](https://grafana.com/docs/k6/latest/using-k6/k6-options/). Configure your load, duration, TLS certificates, and much, much more.
+- [Scenarios](https://grafana.com/docs/k6/latest/using-k6/scenarios/).
+  Choose how to model your workload: open models, closed models, constant RPS, fixed iterations, and more.
+- [Results output](https://grafana.com/docs/k6/latest/results-output/). Study, filter, and export your test results.
+- [JavaScript API](https://grafana.com/docs/k6/latest/javascript-api/). Reference and examples of all k6 modules.
+- [Extensions](https://grafana.com/docs/k6/latest/extensions/). Extend k6 for new protocols and use cases.
+
+These links barely scratch the surface! If you're looking for conceptual information, you can read about [Test types](https://grafana.com/docs/k6/latest/testing-guides/test-types/), [Test strategies](https://grafana.com/docs/k6/latest/testing-guides/), or one of the many informative [Blog posts](https://k6.io/blog).
+
+## Roadmap
+
+Our team is dedicated to continuously improving and providing the best user experience possible. The [public roadmap](https://github.com/orgs/grafana/projects/443/views/1) covers user-oriented features, UX improvements and JavaScript support that our team will focus on. Remember that timeframes and priorities may shift, but we believe it's important to share our vision.
+
+We hope it provides a clear overview of our plans for future development. We welcome feedback, corrections, and suggestions via GitHub to make it more comprehensive, accessible, and valuable for the community.
+
+It's worth mentioning that we consider [upvotes (thumbs-up)](https://github.com/grafana/k6/issues?q=is%3Aissue+is%3Aopen+sort%3Areactions-%2B1-desc) to be one of the essential metrics for determining community needs. If you want to show us the importance of a feature, please give it a thumbs-up.
 
 ## Contribute
 
@@ -98,4 +121,3 @@ To get help, report bugs, suggest features, and discuss k6 with others, refer to
 ## License
 
 k6 is distributed under the [AGPL-3.0 license](https://github.com/grafana/k6/blob/master/LICENSE.md).
-

@@ -1,16 +1,22 @@
 package executor
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"testing"
 	"time"
+
+	"go.k6.io/k6/internal/build"
+	"go.k6.io/k6/internal/lib/testutils"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"gopkg.in/guregu/null.v3"
 
 	"go.k6.io/k6/lib"
+	"go.k6.io/k6/lib/fsext"
 	"go.k6.io/k6/lib/types"
 )
 
@@ -336,6 +342,7 @@ var configMapTestCases = []configMapTestCase{
 	},
 	{`{"carrival": {"executor": "constant-arrival-rate", "rate": 10, "duration": "10m", "preAllocatedVUs": 20, "maxVUs": 30}}`, exp{}},
 	{`{"carrival": {"executor": "constant-arrival-rate", "rate": 10, "duration": "10m", "preAllocatedVUs": 20, "maxVUs": 30, "timeUnit": "-1s"}}`, exp{validationError: true}},
+	{`{"carrival": {"executor": "constant-arrival-rate", "rate": 10, "duration": "10m", "preAllocatedVUs": 20, "maxVUs": 30, "timeUnit": "0s"}}`, exp{validationError: true}},
 	{
 		`{"carrival": {"executor": "constant-arrival-rate", "rate": 10, "duration": "10m", "preAllocatedVUs": 20}}`,
 		exp{custom: func(t *testing.T, cm lib.ScenarioConfigs) {
@@ -399,8 +406,23 @@ var configMapTestCases = []configMapTestCase{
 	{`{"varrival": {"executor": "ramping-arrival-rate", "preAllocatedVUs": 20, "maxVUs": 50}}`, exp{validationError: true}},
 	{`{"varrival": {"executor": "ramping-arrival-rate", "preAllocatedVUs": 20, "maxVUs": 50, "stages": []}}`, exp{validationError: true}},
 	{`{"varrival": {"executor": "ramping-arrival-rate", "preAllocatedVUs": 20, "maxVUs": 50, "stages": [{"duration": "5m", "target": 10}], "timeUnit": "-1s"}}`, exp{validationError: true}},
+	{`{"varrival": {"executor": "ramping-arrival-rate", "preAllocatedVUs": 20, "maxVUs": 50, "stages": [{"duration": "5m", "target": 10}], "timeUnit": "0s"}}`, exp{validationError: true}},
 	{`{"varrival": {"executor": "ramping-arrival-rate", "preAllocatedVUs": 30, "maxVUs": 20, "stages": [{"duration": "5m", "target": 10}]}}`, exp{validationError: true}},
 	// TODO: more tests of mixed executors and execution plans
+
+	// scenario options
+	{
+		`{"ui": {"executor": "shared-iterations", "iterations": 22, "vus": 12, "maxDuration": "100s", "options": {"browser": {"someBrowserOption": true}}}}`,
+		exp{custom: func(t *testing.T, cm lib.ScenarioConfigs) {
+			require.Empty(t, cm["ui"].Validate())
+			siCfg, ok := cm["ui"].(SharedIterationsConfig)
+			require.True(t, ok)
+			require.NotEmpty(t, siCfg.Options.Browser)
+			assert.EqualValues(t, true, siCfg.Options.Browser["someBrowserOption"])
+		}},
+	},
+	// only the "browser" scenario option is supported
+	{`{"ui": {"executor": "shared-iterations", "iterations": 22, "vus": 12, "maxDuration": "100s", "options": {"unsupported": {}}}}`, exp{parseError: true}},
 }
 
 func TestConfigMapParsingAndValidation(t *testing.T) {
@@ -409,7 +431,7 @@ func TestConfigMapParsingAndValidation(t *testing.T) {
 		tc := tc
 		t.Run(fmt.Sprintf("TestCase#%d", i), func(t *testing.T) {
 			t.Parallel()
-			t.Logf(tc.rawJSON)
+			t.Log(tc.rawJSON)
 			var result lib.ScenarioConfigs
 			err := json.Unmarshal([]byte(tc.rawJSON), &result)
 			if tc.expected.parseError {
@@ -429,4 +451,65 @@ func TestConfigMapParsingAndValidation(t *testing.T) {
 			}
 		})
 	}
+}
+
+// Test that the executor configuration is properly written into an archive, and
+// then read back. The reason this test is not in lib/archive_test.go is to avoid
+// an import cycle (lib -> lib/executor -> lib), since we need to import a
+// lib.ExecutorConfig implementation.
+func TestArchiveRoundTripExecutorConfig(t *testing.T) {
+	t.Parallel()
+
+	execCfg := ConstantVUsConfig{
+		BaseConfig: BaseConfig{
+			Name:         "const-vus",
+			Type:         "constant-vus",
+			StartTime:    types.NullDurationFrom(10 * time.Second),
+			GracefulStop: types.NullDurationFrom(30 * time.Second),
+			Env: map[string]string{
+				"FOO": "bar",
+			},
+			Exec: null.StringFrom("default"),
+			Tags: map[string]string{
+				"tagkey": "tagvalue",
+			},
+			Options: &lib.ScenarioOptions{
+				Browser: map[string]any{
+					"someOption": "someValue",
+				},
+			},
+		},
+		VUs:      null.IntFrom(50),
+		Duration: types.NullDurationFrom(10 * time.Minute),
+	}
+	arc1 := &lib.Archive{
+		Type:      "js",
+		K6Version: build.Version,
+		Options: lib.Options{
+			Scenarios: map[string]lib.ExecutorConfig{
+				"const-vus": execCfg,
+			},
+		},
+		FilenameURL: &url.URL{Scheme: "file", Path: "/path/to/a.js"},
+		Data:        []byte(`// a contents`),
+		PwdURL:      &url.URL{Scheme: "file", Path: "/path/to"},
+		Filesystems: map[string]fsext.Fs{
+			"file": testutils.MakeMemMapFs(t, map[string][]byte{
+				"/path/to/a.js": []byte(`// a contents`),
+			}),
+		},
+	}
+
+	buf := bytes.NewBuffer(nil)
+	require.NoError(t, arc1.Write(buf))
+
+	arc2, err := lib.ReadArchive(buf)
+	require.NoError(t, err)
+
+	scenario, ok := arc2.Options.Scenarios["const-vus"]
+	require.True(t, ok, "scenario const-vus not found in archive options")
+	execCfg2, ok := scenario.(ConstantVUsConfig)
+	require.True(t, ok)
+
+	assert.EqualValues(t, execCfg, execCfg2)
 }
